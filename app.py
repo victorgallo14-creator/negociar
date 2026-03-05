@@ -34,7 +34,23 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Função para carregar e tratar os dados (Agora com Cruzamento de Meses)
+# Função robusta para limpar e converter texto em valores monetários (suporta 1.234,56 ou 1234.56)
+def clean_currency_series(series):
+    def clean_val(x):
+        x = str(x).strip()
+        if pd.isna(x) or x == 'nan' or x == '':
+            return 0.0
+        if ',' in x and '.' in x:
+            if x.rfind(',') > x.rfind('.'):  # Formato BR: 1.234,56
+                return x.replace('.', '').replace(',', '.')
+            else:  # Formato US: 1,234.56
+                return x.replace(',', '')
+        elif ',' in x:
+            return x.replace(',', '.')
+        return x
+    return pd.to_numeric(series.apply(clean_val), errors='coerce').fillna(0)
+
+# Função para carregar e tratar os dados (Agora com Cruzamento de Meses e Leitura Segura)
 @st.cache_data
 def load_data(file_detalhe, file_holerite, file_holerite_2=None):
     try:
@@ -42,11 +58,11 @@ def load_data(file_detalhe, file_holerite, file_holerite_2=None):
         df_holerite = pd.read_csv(file_holerite, sep='|', dtype={'Matrícula': str}, encoding='latin1')
 
         if 'Salário Bruto' in df_detalhe.columns:
-            df_detalhe['Salário Bruto'] = pd.to_numeric(df_detalhe['Salário Bruto'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+            df_detalhe['Salário Bruto'] = clean_currency_series(df_detalhe['Salário Bruto'])
         if 'Salário Líquido' in df_detalhe.columns:
-            df_detalhe['Salário Líquido'] = pd.to_numeric(df_detalhe['Salário Líquido'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+            df_detalhe['Salário Líquido'] = clean_currency_series(df_detalhe['Salário Líquido'])
         if 'Valor' in df_holerite.columns:
-            df_holerite['Valor'] = pd.to_numeric(df_holerite['Valor'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+            df_holerite['Valor'] = clean_currency_series(df_holerite['Valor'])
 
         cruzamento_ativo = False
 
@@ -69,7 +85,8 @@ def load_data(file_detalhe, file_holerite, file_holerite_2=None):
             cruzamento_ativo = True
 
             # Recalcula o Salário Bruto Global do arquivo "Detalhe" baseado apenas nas rubricas constantes
-            filtro_exclusao = 'Bruto|Líquido|Base'
+            # Filtro refinado para não excluir "Adicionais" que tenham a palavra Base, apenas "Base de Cálculo", etc.
+            filtro_exclusao = 'Bruto|Líquido|Liquido|Base de'
             holerite_limpo = df_holerite[~df_holerite['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
             
             holerite_prov = holerite_limpo[(holerite_limpo['Valor'] > 0) & ~(holerite_limpo['Evento'].str.contains('Outros Descontos', case=False, na=False))]
@@ -253,7 +270,8 @@ if file_detalhe is not None and file_holerite is not None:
                 
                 holerite_view = holerite_servidor[holerite_servidor['Tipo de Folha'] == tipo_folha_selecionada]
 
-                filtro_tabelas = 'Bruto|Líquido|Base'
+                # Filtro refinado para não excluir as rubricas autênticas com a palavra Base
+                filtro_tabelas = 'Bruto|Líquido|Liquido|Base de'
                 eventos = holerite_view[~holerite_view['Evento'].str.contains(filtro_tabelas, case=False, na=False)]
                 proventos = eventos[(eventos['Valor'] > 0) & ~(eventos['Evento'].str.contains('Outros Descontos', case=False, na=False))][['Evento', 'Valor']]
                 descontos = eventos[eventos['Valor'] < 0][['Evento', 'Valor']]
@@ -272,8 +290,6 @@ if file_detalhe is not None and file_holerite is not None:
 
                 st.markdown("#### 💰 Resumo Financeiro")
                 
-                # Como podemos ter ocultado rubricas no cruzamento, os totais oficiais do arquivo original podem não bater com a tabela.
-                # Portanto, calculamos os totais na hora somando as rubricas exibidas.
                 bruto_calculado = proventos['Valor'].sum()
                 descontos_calculado = descontos['Valor'].sum()
                 liquido_calculado = bruto_calculado + descontos_calculado
@@ -291,7 +307,7 @@ if file_detalhe is not None and file_holerite is not None:
             st.header("📈 Simulador de Negociação Salarial")
             st.markdown("Configure a proposta abaixo para calcular o impacto financeiro global na prefeitura e o reflexo no holerite individual de um servidor.")
 
-            filtro_exclusao = 'Bruto|Líquido|Base'
+            filtro_exclusao = 'Bruto|Líquido|Liquido|Base de'
             df_holerite_limpo = df_holerite[~df_holerite['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
             df_holerite_limpo = df_holerite_limpo[~((df_holerite_limpo['Valor'] > 0) & (df_holerite_limpo['Evento'].str.contains('Outros Descontos', case=False, na=False)))]
             proventos_unicos = sorted(df_holerite_limpo[df_holerite_limpo['Valor'] > 0]['Evento'].dropna().unique().tolist())
