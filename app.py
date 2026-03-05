@@ -120,7 +120,7 @@ def load_data(file_detalhe, file_holerite, file_holerite_2=None):
 def formata_moeda(val):
     return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
 
-# Função para gerar o PDF bonitão
+# Função para gerar o PDF Executivo e Profissional
 def gerar_pdf_bytes(reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_patronal, 
                     custo_total_atual, impacto_mensal_salario, impacto_mensal_va, 
                     impacto_patronal, impacto_mensal_total, impacto_anual_total):
@@ -128,88 +128,99 @@ def gerar_pdf_bytes(reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_p
     pdf = FPDF()
     pdf.add_page()
     
-    # Helper para corrigir caracteres e acentos
+    # Helper para corrigir caracteres e acentos no FPDF
     def txt(texto):
         return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
-    # Cabeçalho
-    pdf.set_font("Arial", 'B', 16)
-    pdf.set_text_color(31, 119, 180) # Azul
-    pdf.cell(0, 10, txt("ESTUDO DE IMPACTO ORÇAMENTÁRIO"), ln=True, align='C')
-    pdf.set_font("Arial", '', 11)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 6, txt("Simulação Oficial de Folha de Pagamento Municipal"), ln=True, align='C')
-    pdf.line(10, 30, 200, 30)
-    pdf.ln(10)
+    # Cabeçalho Institucional
+    pdf.set_font("Arial", 'B', 14)
+    pdf.set_text_color(0, 51, 102) # Azul Escuro
+    pdf.cell(0, 8, txt("RELATÓRIO TÉCNICO DE IMPACTO ORÇAMENTÁRIO E FINANCEIRO"), ln=True, align='C')
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_text_color(100, 100, 100) # Cinza
+    pdf.cell(0, 6, txt("PROJEÇÃO ANALÍTICA DE DESPESAS COM PESSOAL"), ln=True, align='C')
+    pdf.line(10, 25, 200, 25)
+    pdf.ln(8)
 
-    # 1. Parâmetros
-    pdf.set_font("Arial", 'B', 12)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_fill_color(240, 240, 240)
-    pdf.cell(0, 8, txt(" 1. PARÂMETROS DA PROPOSTA"), ln=True, fill=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 7, txt(f"  • Reajuste Salarial: {reajuste_perc:.2f}%"), ln=True)
-    pdf.cell(0, 7, txt(f"  • Aumento Vale Alimentação: {detalhe_va}"), ln=True)
-    pdf.cell(0, 7, txt(f"  • Estender VA para todos: {'Sim' if aplicar_va_todos else 'Não'}"), ln=True)
-    pdf.cell(0, 7, txt(f"  • Custo Previdência Patronal (IPML): {aliquota_ipml_patronal:.2f}%"), ln=True)
-    pdf.ln(5)
-
-    # 2. Cenário Atual
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, txt(" 2. CENÁRIO BASE ATUAL"), ln=True, fill=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(140, 7, txt("  Custo da Folha Atual (Mensal):"))
+    # 1. METODOLOGIA E PREMISSAS
     pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 7, txt(formata_moeda(custo_total_atual)), ln=True, align='R')
-    pdf.ln(5)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(0, 7, txt(" 1. METODOLOGIA E PREMISSAS DE CÁLCULO"), ln=True, fill=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.ln(2)
+    pdf.multi_cell(0, 5, txt("• Base de Dados: Extração analítica dos arquivos oficiais da folha de pagamento via Portal da Transparência."))
+    pdf.multi_cell(0, 5, txt("• Fator de Anualização (13,3): A estimativa de impacto anualizado é obtida pela multiplicação do acréscimo financeiro mensal pelo fator de 13,3. Esta margem assegura o provisionamento integral dos 12 meses civis, acrescido do pagamento do 13º salário e do acréscimo constitucional de 1/3 (um terço) sobre as férias."))
+    pdf.multi_cell(0, 5, txt("• Encargos Patronais: O cálculo da dívida previdenciária patronal não incide de forma bruta sobre o total da folha. A métrica aplica a alíquota definida (neste cenário, para a Previdência Própria) estritamente sobre a variação positiva das rubricas que compõem a base de cálculo previdenciária fixada em lei."))
+    pdf.multi_cell(0, 5, txt("• Proporcionalidade de Benefícios: Nos casos de ajuste percentual ou estrutural no Vale Alimentação, o algoritmo de simulação respeita as proporcionalidades individuais originais, refletindo redutores de assiduidade ou aplicadores de teto salarial preexistentes."))
+    pdf.ln(4)
 
-    # 3. Composição
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, txt(" 3. COMPOSIÇÃO DO ACRÉSCIMO (MENSAL)"), ln=True, fill=True)
+    # 2. Parâmetros
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 7, txt(" 2. DIRETRIZES DA PROPOSTA PARAMETRIZADA"), ln=True, fill=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.ln(2)
+    pdf.cell(0, 6, txt(f"  • Correção Incidente no Salário e Adicionais Proporcionais: {reajuste_perc:.2f}%"), ln=True)
+    pdf.cell(0, 6, txt(f"  • Estrutura de Aumento no Vale Alimentação: {detalhe_va}"), ln=True)
+    pdf.cell(0, 6, txt(f"  • Extensão de Concessão do VA a todos os ativos: {'Habilitado' if aplicar_va_todos else 'Não Habilitado'}"), ln=True)
+    pdf.cell(0, 6, txt(f"  • Custo Fixo Parametrizado da Previdência Patronal: {aliquota_ipml_patronal:.2f}%"), ln=True)
+    pdf.ln(4)
+
+    # 3. Cenário Atual
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 7, txt(" 3. DIAGNÓSTICO DO CENÁRIO BASE ATUAL"), ln=True, fill=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.ln(2)
+    pdf.cell(140, 6, txt("  Custo de Vencimentos Brutos da Folha (Competência Mensal):"))
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(0, 6, txt(formata_moeda(custo_total_atual)), ln=True, align='R')
+    pdf.ln(4)
+
+    # 4. Composição
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 7, txt(" 4. DEMONSTRATIVO DO IMPACTO FINANCEIRO MENSAL"), ln=True, fill=True)
     
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(140, 7, txt("  Impacto Direto (Salários e Adicionais Proporcionais):"))
-    pdf.cell(0, 7, txt(formata_moeda(impacto_mensal_salario)), ln=True, align='R')
+    pdf.set_font("Arial", '', 10)
+    pdf.ln(2)
+    pdf.cell(140, 6, txt("  Acréscimo Direto (Vencimento Base e Efeito Cascata em Adicionais):"))
+    pdf.cell(0, 6, txt(formata_moeda(impacto_mensal_salario)), ln=True, align='R')
     
-    pdf.cell(140, 7, txt("  Impacto no Benefício (Vale Alimentação):"))
-    pdf.cell(0, 7, txt(formata_moeda(impacto_mensal_va)), ln=True, align='R')
+    pdf.cell(140, 6, txt("  Acréscimo Indenizatório (Vale Alimentação e Expansão de Cobertura):"))
+    pdf.cell(0, 6, txt(formata_moeda(impacto_mensal_va)), ln=True, align='R')
     
-    pdf.cell(140, 7, txt("  Impacto em Encargos (Acréscimo Dívida Patronal):"))
-    pdf.cell(0, 7, txt(formata_moeda(impacto_patronal)), ln=True, align='R')
+    pdf.cell(140, 6, txt("  Acréscimo Previdenciário (Projeção da Dívida Patronal):"))
+    pdf.cell(0, 6, txt(formata_moeda(impacto_patronal)), ln=True, align='R')
     
     pdf.line(10, pdf.get_y()+2, 200, pdf.get_y()+2)
     pdf.ln(4)
     
-    pdf.set_font("Arial", 'B', 12)
-    pdf.set_text_color(214, 39, 40) # Vermelho
-    pdf.cell(140, 8, txt("  ACRÉSCIMO MENSAL TOTAL ESTIMADO:"))
-    pdf.cell(0, 8, txt(formata_moeda(impacto_mensal_total)), ln=True, align='R')
+    pdf.set_font("Arial", 'B', 11)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(140, 7, txt("  RESULTADO DO IMPACTO MENSAL NA FOLHA:"))
+    pdf.cell(0, 7, txt(formata_moeda(impacto_mensal_total)), ln=True, align='R')
     
     pct_impacto = (impacto_mensal_total/custo_total_atual)*100 if custo_total_atual else 0
-    pdf.set_font("Arial", 'I', 10)
-    pdf.cell(0, 6, txt(f"  (Representa um aumento de +{pct_impacto:.2f}% na folha atual)"), ln=True, align='R')
-    pdf.ln(5)
+    pdf.set_font("Arial", 'I', 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 5, txt(f"  (Crescimento percentual estimado de +{pct_impacto:.2f}% sobre o diagnóstico base)"), ln=True, align='R')
+    pdf.ln(4)
 
-    # 4. Projeções
+    # 5. Projeções Anuais
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, txt(" 4. PROJEÇÕES FINANCEIRAS"), ln=True, fill=True)
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 7, txt(" 5. CONSOLIDAÇÃO E PROJEÇÕES ORÇAMENTÁRIAS"), ln=True, fill=True)
+    pdf.ln(2)
     
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(140, 8, txt("  Novo Custo Folha (Mensal):"))
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, txt(formata_moeda(custo_total_atual + impacto_mensal_total)), ln=True, align='R')
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(140, 7, txt("  Custo da Folha Consolidada (Mensal Projetado):"))
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 7, txt(formata_moeda(custo_total_atual + impacto_mensal_total)), ln=True, align='R')
     
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(140, 8, txt("  IMPACTO ANUALIZADO NO ORÇAMENTO (Provisionamento):"))
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_text_color(214, 39, 40) # Vermelho
+    pdf.cell(140, 7, txt("  PROVISIONAMENTO ANUAL EXIGIDO (Acúmulo de +13,3 folhas):"))
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, txt(formata_moeda(impacto_anual_total)), ln=True, align='R')
-    
-    # Rodapé / Nota Metodológica
-    pdf.set_y(-30)
-    pdf.set_font("Arial", 'I', 8)
-    pdf.set_text_color(120, 120, 120)
-    pdf.multi_cell(0, 4, txt("Nota Metodológica: A projeção anualizada considera 12 folhas mensais acrescidas de estimativa de 13º salário e 1/3 de férias (fator multiplicador 13.3). O impacto patronal considera apenas o aumento direto da dívida atrelada à rubrica reajustada no mês simulado."))
+    pdf.cell(0, 7, txt(formata_moeda(impacto_anual_total)), ln=True, align='R')
     
     # Processa e garante o output binário
     pdf_out = pdf.output(dest='S')
@@ -576,67 +587,82 @@ if file_detalhe is not None and file_holerite is not None:
             # =========================================================================
             st.markdown("---")
             st.subheader("📄 Relatório Oficial (Exportação para Mesa de Negociação)")
-            st.markdown("Gere um documento formal da simulação atual para ser anexado em atas, ofícios e apresentações.")
+            st.markdown("Gere um documento formal, metodológico e auditável da simulação para ser anexado em atas, ofícios e documentações legais.")
             
             # Formatação Dinâmica do Texto do VA para os relatórios
             if tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
-                detalhe_va = "Ajuste específico por faixas"
+                detalhe_va = "Ajuste específico por limites de faixas consolidadas"
             elif tipo_reajuste_va == "Percentual (%)":
-                detalhe_va = f"{aumento_va_val:.2f}% sobre valor atual"
+                detalhe_va = f"{aumento_va_val:.2f}% aplicado proporcionalmente"
             else:
-                detalhe_va = f"R$ {aumento_va_val:.2f} (Adicional Fixo Geral)"
+                detalhe_va = f"R$ {aumento_va_val:.2f} (Injeção em formato de Adicional Fixo)"
 
-            relatorio_texto = f"""======================================================
-     RELATÓRIO OFICIAL DE IMPACTO ORÇAMENTÁRIO
-======================================================
+            relatorio_texto = f"""================================================================================
+        RELATÓRIO TÉCNICO DE IMPACTO ORÇAMENTÁRIO E FINANCEIRO
+              Projeção Analítica de Despesas com Pessoal
+================================================================================
 
-1. PARÂMETROS DA PROPOSTA
-- Reajuste Salarial: {reajuste_perc:.2f}%
-- Aumento no Vale Alimentação: {detalhe_va}
-- Extensão do VA para todos os ativos: {'Sim' if aplicar_va_todos else 'Não'}
-- Alíquota Previdência (IPML Patronal): {aliquota_ipml_patronal:.2f}%
+1. METODOLOGIA E PREMISSAS DE CÁLCULO
+--------------------------------------------------------------------------------
+- Base de Dados: Extração analítica dos arquivos oficiais da folha de pagamento.
+- Fator de Anualização (13,3): A estimativa de impacto anualizado é obtida 
+  multiplicando o acréscimo financeiro mensal pelo fator de 13,3. Isso assegura 
+  o provisionamento de 12 meses, acrescido de 13º salário e 1/3 de férias.
+- Encargos Patronais: O cálculo da dívida previdenciária patronal incide estritamente
+  sobre a variação da base de cálculo previdenciária fixada parametrizada.
+- Benefícios (VA): O algoritmo respeita as proporcionalidades preexistentes 
+  (como redutores de assiduidade ou teto remuneratório).
 
-2. CENÁRIO ATUAL
-- Custo Folha Atual (Mensal): {formata_moeda(custo_total_atual)}
+2. DIRETRIZES DA PROPOSTA PARAMETRIZADA
+--------------------------------------------------------------------------------
+- Correção Incidente no Salário e Adicionais: {reajuste_perc:.2f}%
+- Estrutura de Aumento no Vale Alimentação: {detalhe_va}
+- Expansão da Cobertura de Benefícios (VA) aos inativos/não-recebedores: {'Sim' if aplicar_va_todos else 'Não'}
+- Custo Fixo Parametrizado (Previdência Patronal): {aliquota_ipml_patronal:.2f}%
 
-3. COMPOSIÇÃO DO ACRÉSCIMO (MENSAL)
-- Impacto Direto (Salários e Adicionais): {formata_moeda(impacto_mensal_salario)}
-- Impacto no Benefício (Vale Alimentação): {formata_moeda(impacto_mensal_va)}
-- Impacto em Encargos (Custo IPML Extra): {formata_moeda(impacto_patronal)}
-------------------------------------------------------
-- ACRÉSCIMO MENSAL TOTAL ESTIMADO: {formata_moeda(impacto_mensal_total)} (+{(impacto_mensal_total/custo_total_atual)*100 if custo_total_atual else 0:.2f}%)
+3. DIAGNÓSTICO DO CENÁRIO BASE ATUAL
+--------------------------------------------------------------------------------
+- Custo de Vencimentos Brutos da Folha (Mensal): {formata_moeda(custo_total_atual)}
 
-4. PROJEÇÃO FINAL E ANUALIZADA
-- NOVO CUSTO MENSAL PROJETADO: {formata_moeda(custo_total_atual + impacto_mensal_total)}
-- IMPACTO ANUALIZADO NO ORÇAMENTO: {formata_moeda(impacto_anual_total)}
+4. DEMONSTRATIVO DO IMPACTO FINANCEIRO MENSAL
+--------------------------------------------------------------------------------
+- Acréscimo Direto (Vencimentos e Efeito Cascata): {formata_moeda(impacto_mensal_salario)}
+- Acréscimo Indenizatório (Vale Alimentação): {formata_moeda(impacto_mensal_va)}
+- Acréscimo Previdenciário (Projeção da Dívida Patronal): {formata_moeda(impacto_patronal)}
+> RESULTADO DO IMPACTO MENSAL NA FOLHA: {formata_moeda(impacto_mensal_total)} 
+  (Crescimento percentual estimado de +{(impacto_mensal_total/custo_total_atual)*100 if custo_total_atual else 0:.2f}%)
 
-======================================================
-* Relatório gerado automaticamente pelo Sistema Estratégico de Folha de Pagamento.
-* Nota: A projeção anualizada considera 13.3 folhas (reflexo em 13º e Férias).
+5. CONSOLIDAÇÃO E PROJEÇÕES ORÇAMENTÁRIAS
+--------------------------------------------------------------------------------
+- Custo da Folha Consolidada (Mensal Projetado): {formata_moeda(custo_total_atual + impacto_mensal_total)}
+>>> PROVISIONAMENTO ANUAL EXIGIDO: {formata_moeda(impacto_anual_total)}
+
+================================================================================
+* Este documento foi gerado automaticamente pelo Sistema Analítico de Folha.
 """         
             col_download_1, col_download_2 = st.columns(2)
             
             with col_download_1:
                 st.download_button(
-                    label="📥 Baixar Resumo Simples em Texto (.txt)",
+                    label="📥 Baixar Relatório Técnico em Texto (.txt)",
                     data=relatorio_texto,
-                    file_name="Relatorio_Impacto_Orcamentario.txt",
+                    file_name="Relatorio_Impacto_Orcamentario_Tecnico.txt",
                     mime="text/plain",
                     use_container_width=True
                 )
             
             with col_download_2:
                 if HAS_FPDF:
-                    # Gera os bytes do PDF na hora de clicar
+                    # Gera os bytes do PDF com as novas premissas técnicas
                     pdf_bytes = gerar_pdf_bytes(
                         reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_patronal, 
                         custo_total_atual, impacto_mensal_salario, impacto_mensal_va, 
                         impacto_patronal, impacto_mensal_total, impacto_anual_total
                     )
                     st.download_button(
-                        label="📄 Baixar Relatório Oficial em PDF (.pdf)",
+                        label="📄 Baixar Relatório Técnico em PDF (.pdf)",
                         data=pdf_bytes,
-                        file_name="Relatorio_Impacto_Orcamentario.pdf",
+                        file_name="Relatorio_Impacto_Orcamentario_Tecnico.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
