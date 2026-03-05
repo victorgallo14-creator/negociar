@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 # Configuração inicial da página
 st.set_page_config(
@@ -355,6 +356,3 @@ else:
     * Pesquisar o holerite aberto de qualquer servidor.
     * **Mesa de Negociação:** Simular online qual o custo em Reais que um reajuste de X% ou um aumento no vale-alimentação causará no orçamento da prefeitura.
     """)
-
-# Como o Plotly Graph Objects foi usado no Waterfall, importando aqui para não quebrar caso o usuário execute
-import plotly.graph_objects as go
