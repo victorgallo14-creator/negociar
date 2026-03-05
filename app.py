@@ -305,7 +305,7 @@ if file_detalhe is not None and file_holerite is not None:
                 res_col3.metric(f"Salário Líquido{label_sufixo}", formata_moeda(liquido_calculado))
 
         # =========================================================================
-        # ABA 4: SIMULADOR DE IMPACTO (COM ENCARGOS AVANÇADOS)
+        # ABA 4: SIMULADOR DE IMPACTO (COM ENCARGOS AVANÇADOS E FAIXAS DE VA)
         # =========================================================================
         with tab_simulador:
             st.header("📈 Simulador de Negociação Salarial")
@@ -336,16 +336,44 @@ if file_detalhe is not None and file_holerite is not None:
                     nome_rubrica_va = st.selectbox("Rubrica do Vale/Auxílio Alimentação:", options=proventos_unicos, index=indice_va)
                     
                     va_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_va.upper()]
-                    valor_va_medio_atual = va_atual_df['Valor'].mean() if not va_atual_df.empty else 0
-                    st.caption(f"Valor médio praticado: {formata_moeda(valor_va_medio_atual)}. Variações por faltas/teto serão mantidas no ajuste percentual.")
+                    qtd_servidores_va = va_atual_df['Matrícula'].nunique()
                     
-                    tipo_reajuste_va = st.radio("Tipo de Aumento no VA:", ["Percentual (%)", "Fixo (R$)"], horizontal=True)
-                    if tipo_reajuste_va == "Percentual (%)":
-                        aumento_va_val = st.number_input("Aumento no Vale Alimentação (%):", min_value=0.0, value=0.0, step=1.0)
+                    # Idenficação inteligente das top 4 faixas de VA praticadas
+                    faixas_va_atuais = va_atual_df[va_atual_df['Valor'] > 0]['Valor'].value_counts().head(4).index.sort_values(ascending=False).tolist()
+                    
+                    tipo_reajuste_va = st.radio("Tipo de Aumento no VA:", ["Por Faixas (Valores Diferentes)", "Percentual (%)", "Fixo Único (R$)"], horizontal=True)
+                    
+                    mapa_faixas_va = {}
+                    aumento_va_val = 0.0
+                    
+                    if tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
+                        st.info("💡 Detectamos as faixas mais praticadas. Digite o novo valor desejado para cada uma:")
+                        col_f1, col_f2 = st.columns(2)
+                        for i, faixa in enumerate(faixas_va_atuais):
+                            with col_f1 if i % 2 == 0 else col_f2:
+                                mapa_faixas_va[faixa] = st.number_input(f"Atual: R$ {faixa:.2f} ➔ Novo:", min_value=0.0, value=float(faixa), step=10.0, key=f"faixa_{faixa}")
+                    elif tipo_reajuste_va == "Percentual (%)":
+                        aumento_va_val = st.number_input("Aumento Geral no Vale Alimentação (%):", min_value=0.0, value=0.0, step=1.0)
                     else:
-                        aumento_va_val = st.number_input("Aumento FIXO no Vale Alimentação (R$):", min_value=0.0, value=0.0, step=10.0)
+                        aumento_va_val = st.number_input("Aumento FIXO para todos (R$):", min_value=0.0, value=0.0, step=10.0)
                         
                     aplicar_va_todos = st.checkbox("Aplicar aumento de VA para TODOS os ativos (mesmo os que não recebem)?")
+
+                # FUNÇÃO LOCAL DE CÁLCULO DE VA (Para usar no global e no individual)
+                def calcular_novo_va(valor_antigo):
+                    if tipo_reajuste_va == "Percentual (%)":
+                        return valor_antigo * (1 + (aumento_va_val / 100))
+                    elif tipo_reajuste_va == "Fixo Único (R$)":
+                        return valor_antigo + aumento_va_val
+                    elif tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
+                        if valor_antigo in mapa_faixas_va:
+                            return mapa_faixas_va[valor_antigo]
+                        elif faixas_va_atuais:
+                            # Se for um valor fracionado atípico, aproxima da faixa mais próxima percentualmente
+                            faixa_mais_proxima = min(faixas_va_atuais, key=lambda x: abs(x - valor_antigo))
+                            pct_aumento_faixa = (mapa_faixas_va[faixa_mais_proxima] / faixa_mais_proxima) if faixa_mais_proxima > 0 else 1
+                            return valor_antigo * pct_aumento_faixa
+                    return valor_antigo
 
                 # EXPANDER PARA ENCARGOS SEPARADOS (IPML x MÉDICA)
                 with st.expander("⚙️ Configurações Avançadas (Bases de Cálculo, IPML e Assistência Médica)"):
@@ -388,17 +416,21 @@ if file_detalhe is not None and file_holerite is not None:
                 impacto_mensal_salario = 0
             
             # 2. Impacto VA
-            qtd_servidores_va = va_atual_df['Matrícula'].nunique()
-            if tipo_reajuste_va == "Percentual (%)":
-                impacto_mensal_va = va_atual_df['Valor'].sum() * (aumento_va_val / 100)
-                if aplicar_va_todos: 
-                    servidores_sem_va = df_detalhe['Matrícula'].nunique() - qtd_servidores_va
-                    impacto_mensal_va += (servidores_sem_va * valor_va_medio_atual * (1 + aumento_va_val/100))
-            else:
-                if aplicar_va_todos:
-                    impacto_mensal_va = df_detalhe['Matrícula'].nunique() * aumento_va_val
-                else:
-                    impacto_mensal_va = qtd_servidores_va * aumento_va_val
+            custo_va_atual = va_atual_df['Valor'].sum()
+            novo_custo_va = va_atual_df['Valor'].apply(calcular_novo_va).sum()
+            impacto_mensal_va = novo_custo_va - custo_va_atual
+            
+            if aplicar_va_todos: 
+                servidores_sem_va = df_detalhe['Matrícula'].nunique() - qtd_servidores_va
+                # Qual valor dar para quem não tinha? Vamos dar o TETO (maior faixa) ou o valor fixo
+                if tipo_reajuste_va == "Por Faixas (Valores Diferentes)" and faixas_va_atuais:
+                    valor_injetar = mapa_faixas_va[max(faixas_va_atuais)]
+                elif tipo_reajuste_va == "Fixo Único (R$)":
+                    valor_injetar = aumento_va_val
+                else: # Percentual, ganha a média inflacionada
+                    media_va = custo_va_atual / qtd_servidores_va if qtd_servidores_va else 0
+                    valor_injetar = media_va * (1 + aumento_va_val/100)
+                impacto_mensal_va += (servidores_sem_va * valor_injetar)
 
             # 3. Impacto Patronal (Prefeitura) calculado de forma exata sobre as rubricas que são da base do IPML E sofreram reajuste
             rubricas_afetadas_ipml = list(set(rubricas_base_ipml) & set(rubricas_reajuste))
@@ -438,14 +470,21 @@ if file_detalhe is not None and file_holerite is not None:
             st.subheader("📄 Relatório de Impacto Orçamentário")
             st.markdown("Gere um resumo textual consolidado da simulação atual para incluir em atas, apresentações ou documentos oficiais.")
             
-            # Formataçao do Relatório em Texto
+            # Formatação Dinâmica do Texto do VA
+            if tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
+                detalhe_va = "Ajuste específico por faixas (Valores Individuais)"
+            elif tipo_reajuste_va == "Percentual (%)":
+                detalhe_va = f"{aumento_va_val:.2f}% sobre valor atual"
+            else:
+                detalhe_va = f"R$ {aumento_va_val:.2f} (Adicional Fixo Geral)"
+
             relatorio_texto = f"""======================================================
      RELATÓRIO OFICIAL DE IMPACTO ORÇAMENTÁRIO
 ======================================================
 
 1. PARÂMETROS DA PROPOSTA
 - Reajuste Salarial: {reajuste_perc:.2f}%
-- Aumento no Vale Alimentação: {aumento_va_val:.2f} ({tipo_reajuste_va})
+- Aumento no Vale Alimentação: {detalhe_va}
 - Extensão do VA para todos os ativos: {'Sim' if aplicar_va_todos else 'Não'}
 - Alíquota Previdência (IPML Patronal): {aliquota_ipml_patronal:.2f}%
 
@@ -478,7 +517,7 @@ if file_detalhe is not None and file_holerite is not None:
                 mime="text/plain"
             )
 
-            # SIMULAÇÃO INDIVIDUAL COM DESCONTOS CORRIGIDOS
+            # SIMULAÇÃO INDIVIDUAL COM DESCONTOS CORRIGIDOS E FAIXAS DE VA
             st.markdown("---")
             st.subheader("👤 Simulação de Holerite Individual (Aumento Real)")
             st.markdown("Veja o reflexo da proposta no contracheque. **As bases de cálculo do IPML e da Assistência Médica estão separadas**, garantindo que a dedução simulada é matematicamente precisa.")
@@ -514,17 +553,23 @@ if file_detalhe is not None and file_holerite is not None:
                     if mask_proporcionais.any():
                         eventos_sim.loc[mask_proporcionais, 'Valor Simulado'] = eventos_sim.loc[mask_proporcionais, 'Valor'] * (1 + (reajuste_perc / 100))
                     
-                    # 2. Aplica VA
-                    mask_va = eventos_sim['Evento'].str.upper() == nome_rubrica_va.upper()
-                    if mask_va.any():
-                        if tipo_reajuste_va == "Percentual (%)":
-                            eventos_sim.loc[mask_va, 'Valor Simulado'] = eventos_sim.loc[mask_va, 'Valor'] * (1 + (aumento_va_val / 100))
+                    # 2. Aplica VA com a nova regra de faixas dinâmicas
+                    mask_va_ind = eventos_sim['Evento'].str.upper() == nome_rubrica_va.upper()
+                    if mask_va_ind.any():
+                        eventos_sim.loc[mask_va_ind, 'Valor Simulado'] = eventos_sim.loc[mask_va_ind, 'Valor'].apply(calcular_novo_va)
+                    elif aplicar_va_todos:
+                        # Qual valor dar para quem não tinha?
+                        if tipo_reajuste_va == "Por Faixas (Valores Diferentes)" and faixas_va_atuais:
+                            valor_injetar_ind = mapa_faixas_va[max(faixas_va_atuais)]
+                        elif tipo_reajuste_va == "Fixo Único (R$)":
+                            valor_injetar_ind = aumento_va_val
                         else:
-                            eventos_sim.loc[mask_va, 'Valor Simulado'] = eventos_sim.loc[mask_va, 'Valor'] + aumento_va_val
-                    elif aplicar_va_todos and aumento_va_val > 0:
-                        valor_injetar = (valor_va_medio_atual * (1 + aumento_va_val/100)) if tipo_reajuste_va == "Percentual (%)" else aumento_va_val
-                        nova_rubrica = pd.DataFrame([{'Matrícula': mat_servidor_sim, 'Nome': servidor_info_sim['Nome'], 'Tipo de Folha': 'Pagamento Mensal', 'Evento': nome_rubrica_va, 'Valor': 0.0, 'Valor Simulado': valor_injetar}])
-                        eventos_sim = pd.concat([eventos_sim, nova_rubrica], ignore_index=True)
+                            media_va = custo_va_atual / qtd_servidores_va if qtd_servidores_va else 0
+                            valor_injetar_ind = media_va * (1 + aumento_va_val/100)
+                            
+                        if valor_injetar_ind > 0:
+                            nova_rubrica = pd.DataFrame([{'Matrícula': mat_servidor_sim, 'Nome': servidor_info_sim['Nome'], 'Tipo de Folha': 'Pagamento Mensal', 'Evento': nome_rubrica_va, 'Valor': 0.0, 'Valor Simulado': valor_injetar_ind}])
+                            eventos_sim = pd.concat([eventos_sim, nova_rubrica], ignore_index=True)
 
                     # 3. Recalcula Descontos Separados (IPML vs Médica vs INSS)
                     base_ipml_sim_ind = eventos_sim[eventos_sim['Evento'].isin(rubricas_base_ipml)]['Valor Simulado'].sum()
