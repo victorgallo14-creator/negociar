@@ -34,9 +34,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Função para carregar e tratar os dados
+# Função para carregar e tratar os dados (Agora com Cruzamento de Meses)
 @st.cache_data
-def load_data(file_detalhe, file_holerite):
+def load_data(file_detalhe, file_holerite, file_holerite_2=None):
     try:
         df_detalhe = pd.read_csv(file_detalhe, sep='|', dtype={'Matrícula': str}, encoding='latin1')
         df_holerite = pd.read_csv(file_holerite, sep='|', dtype={'Matrícula': str}, encoding='latin1')
@@ -48,13 +48,44 @@ def load_data(file_detalhe, file_holerite):
         if 'Valor' in df_holerite.columns:
             df_holerite['Valor'] = pd.to_numeric(df_holerite['Valor'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
 
+        cruzamento_ativo = False
+
+        # Lógica de Cruzamento de Rubricas (Manter apenas o que é constante)
+        if file_holerite_2 is not None:
+            df_holerite_2 = pd.read_csv(file_holerite_2, sep='|', dtype={'Matrícula': str}, encoding='latin1')
+            
+            # Pega as matrículas e os eventos que existem no mês 2
+            matriculas_mes2 = df_holerite_2['Matrícula'].unique()
+            df_holerite_comuns = df_holerite[df_holerite['Matrícula'].isin(matriculas_mes2)]
+            df_holerite_novos = df_holerite[~df_holerite['Matrícula'].isin(matriculas_mes2)] # Mantém quem é recém contratado intacto
+            
+            eventos_mes2 = df_holerite_2[['Matrícula', 'Evento']].drop_duplicates()
+            
+            # Realiza um Inner Join: Só sobrevivem as linhas que apareceram nos dois meses para aquele servidor
+            df_holerite_comuns_filtrado = df_holerite_comuns.merge(eventos_mes2, on=['Matrícula', 'Evento'], how='inner')
+            
+            # Junta tudo novamente
+            df_holerite = pd.concat([df_holerite_comuns_filtrado, df_holerite_novos], ignore_index=True)
+            cruzamento_ativo = True
+
+            # Recalcula o Salário Bruto Global do arquivo "Detalhe" baseado apenas nas rubricas constantes
+            filtro_exclusao = 'Bruto|Líquido|Base'
+            holerite_limpo = df_holerite[~df_holerite['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
+            
+            holerite_prov = holerite_limpo[(holerite_limpo['Valor'] > 0) & ~(holerite_limpo['Evento'].str.contains('Outros Descontos', case=False, na=False))]
+            bruto_padrao = holerite_prov.groupby('Matrícula')['Valor'].sum().reset_index()
+            bruto_padrao.rename(columns={'Valor': 'Novo_Bruto'}, inplace=True)
+            
+            df_detalhe = df_detalhe.merge(bruto_padrao, on='Matrícula', how='left')
+            df_detalhe['Salário Bruto'] = df_detalhe['Novo_Bruto'].fillna(df_detalhe['Salário Bruto'])
+
         df_detalhe_mensal = df_detalhe[df_detalhe['Tipo Folha'].astype(str).str.contains('Mensal', case=False, na=False)]
         df_holerite_mensal = df_holerite[df_holerite['Tipo de Folha'].astype(str).str.contains('Mensal', case=False, na=False)]
 
-        return df_detalhe_mensal, df_holerite_mensal, df_detalhe, df_holerite
+        return df_detalhe_mensal, df_holerite_mensal, df_detalhe, df_holerite, cruzamento_ativo
     except Exception as e:
         st.error(f"Erro ao processar os arquivos. Verifique se o formato está correto. Detalhe: {e}")
-        return None, None, None, None
+        return None, None, None, None, False
 
 def formata_moeda(val):
     return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
@@ -66,13 +97,23 @@ st.markdown("Plataforma de análise e simulação de impactos financeiros da fol
 # Sidebar - Upload de Arquivos
 st.sidebar.header("📥 Entrada de Dados")
 file_detalhe = st.sidebar.file_uploader("1. Detalhe Funcionários (CSV)", type=['csv'])
-file_holerite = st.sidebar.file_uploader("2. Holerite Eventos (CSV)", type=['csv'])
+file_holerite = st.sidebar.file_uploader("2. Holerite Mês de Referência (CSV)", type=['csv'], help="Este será o mês usado como base para os valores.")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Filtro de Rubricas Constantes (Opcional)**")
+st.sidebar.info("Faça upload de um mês diferente para cruzar dados e remover rubricas variáveis (férias, extras, faltas). O sistema simulará um 'mês padrão'.")
+file_holerite_2 = st.sidebar.file_uploader("3. Holerite Mês de Comparação (CSV)", type=['csv'])
 
 if file_detalhe is not None and file_holerite is not None:
-    df_detalhe, df_holerite, df_detalhe_full, df_holerite_full = load_data(file_detalhe, file_holerite)
+    dados_carregados = load_data(file_detalhe, file_holerite, file_holerite_2)
     
-    if df_detalhe is not None:
+    if dados_carregados[0] is not None:
+        df_detalhe, df_holerite, df_detalhe_full, df_holerite_full, cruzamento_ativo = dados_carregados
+        
         st.sidebar.success("✅ Dados carregados com sucesso!")
+        if cruzamento_ativo:
+            st.sidebar.success("✨ **Cruzamento Ativo:** O sistema filtrou o contracheque e está utilizando apenas as rubricas fixas/constantes de cada servidor!")
+
         st.sidebar.markdown("---")
         st.sidebar.info("💡 **Dica:** Utilize as abas no painel principal para navegar entre as diferentes ferramentas do sistema sem precisar recarregar a página.")
         
@@ -88,6 +129,9 @@ if file_detalhe is not None and file_holerite is not None:
         # ABA 1: VISÃO GERAL
         # =========================================================================
         with tab_geral:
+            if cruzamento_ativo:
+                st.info("ℹ️ Os valores de 'Custo Bruto' e 'Média Salarial' abaixo representam o cenário padrão (sem rubricas variáveis), gerado pelo cruzamento dos arquivos.")
+
             st.header("Visão Global do Município (Folha Mensal)")
             
             col1, col2, col3, col4 = st.columns(4)
@@ -168,6 +212,9 @@ if file_detalhe is not None and file_holerite is not None:
             st.header("Consulta Individual de Holerite")
             st.markdown("Verifique os detalhamentos da folha de pagamento de um servidor específico.")
 
+            if cruzamento_ativo:
+                st.info("✨ **Modo Holerite Padrão Ativo:** Você está visualizando apenas os eventos fixos deste servidor. Rubricas variáveis (como férias) foram automaticamente removidas.")
+
             # Container para a busca
             with st.container(border=True):
                 col_busca1, col_busca2 = st.columns([1, 3])
@@ -205,9 +252,6 @@ if file_detalhe is not None and file_holerite is not None:
                 tipo_folha_selecionada = st.selectbox("Selecione a Folha de Referência:", tipos_folha_disp)
                 
                 holerite_view = holerite_servidor[holerite_servidor['Tipo de Folha'] == tipo_folha_selecionada]
-                
-                bruto_oficial = holerite_view[holerite_view['Evento'].str.contains('Bruto', case=False, na=False)]['Valor'].sum()
-                liquido_oficial = holerite_view[holerite_view['Evento'].str.contains('Líquido', case=False, na=False)]['Valor'].sum()
 
                 filtro_tabelas = 'Bruto|Líquido|Base'
                 eventos = holerite_view[~holerite_view['Evento'].str.contains(filtro_tabelas, case=False, na=False)]
@@ -227,10 +271,18 @@ if file_detalhe is not None and file_holerite is not None:
                     st.dataframe(descontos_fmt, hide_index=True, use_container_width=True)
 
                 st.markdown("#### 💰 Resumo Financeiro")
+                
+                # Como podemos ter ocultado rubricas no cruzamento, os totais oficiais do arquivo original podem não bater com a tabela.
+                # Portanto, calculamos os totais na hora somando as rubricas exibidas.
+                bruto_calculado = proventos['Valor'].sum()
+                descontos_calculado = descontos['Valor'].sum()
+                liquido_calculado = bruto_calculado + descontos_calculado
+
                 res_col1, res_col2, res_col3 = st.columns(3)
-                res_col1.metric("Salário Bruto", formata_moeda(bruto_oficial))
-                res_col2.metric("Total de Descontos", formata_moeda(descontos['Valor'].sum()))
-                res_col3.metric("Salário Líquido", formata_moeda(liquido_oficial))
+                label_sufixo = " (Constante)" if cruzamento_ativo else ""
+                res_col1.metric(f"Salário Bruto{label_sufixo}", formata_moeda(bruto_calculado))
+                res_col2.metric(f"Total de Descontos{label_sufixo}", formata_moeda(descontos_calculado))
+                res_col3.metric(f"Salário Líquido{label_sufixo}", formata_moeda(liquido_calculado))
 
         # =========================================================================
         # ABA 4: SIMULADOR DE IMPACTO
@@ -272,7 +324,7 @@ if file_detalhe is not None and file_holerite is not None:
                     aumento_va_fixo = st.number_input("Aumento FIXO no Vale Alimentação (R$):", min_value=0.0, value=0.0, step=10.0)
                     aplicar_va_todos = st.checkbox("Aplicar aumento de VA para TODOS os ativos (mesmo os que não recebem)?")
 
-            # Cálculos
+            # Cálculos Globais
             custo_total_atual = df_detalhe['Salário Bruto'].sum()
             
             if rubricas_reajuste:
@@ -388,7 +440,7 @@ if file_detalhe is not None and file_holerite is not None:
 
 else:
     # Tela Inicial
-    st.info("👈 Por favor, faça o upload dos dois arquivos CSV no menu lateral para iniciar.")
+    st.info("👈 Por favor, faça o upload dos arquivos CSV no menu lateral para iniciar.")
     st.markdown("""
     ### Bem-vindo ao Sistema Estratégico de Folha de Pagamento!
     Para iniciar, carregue os ficheiros de **Detalhe dos Funcionários** e **Holerites** na barra à esquerda.
