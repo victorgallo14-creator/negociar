@@ -32,8 +32,8 @@ st.markdown("""
 def load_data(file_detalhe, file_holerite):
     try:
         # Lendo os arquivos CSV (tratando o delimitador '|')
-        df_detalhe = pd.read_csv(file_detalhe, sep='|', dtype={'Matrícula': str})
-        df_holerite = pd.read_csv(file_holerite, sep='|', dtype={'Matrícula': str})
+        df_detalhe = pd.read_csv(file_detalhe, sep='|', dtype={'Matrícula': str}, encoding='latin1')
+        df_holerite = pd.read_csv(file_holerite, sep='|', dtype={'Matrícula': str}, encoding='latin1')
 
         # Limpeza e conversão de dados do Detalhe
         if 'Salário Bruto' in df_detalhe.columns:
