@@ -212,13 +212,19 @@ if file_detalhe is not None and file_holerite is not None:
                 
                 holerite_view = holerite_servidor[holerite_servidor['Tipo de Folha'] == tipo_folha_selecionada]
                 
-                # Separar eventos informativos de proventos e descontos
-                # Valores positivos são proventos, negativos são descontos. Filtramos totalizadores e informativos.
-                filtro_exclusao = 'Bruto|Líquido|Outros Descontos|Base'
-                totais = holerite_view[holerite_view['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
-                eventos = holerite_view[~holerite_view['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
+                # 1. Extrair os totais oficiais do contracheque (Bruto e Líquido)
+                bruto_oficial = holerite_view[holerite_view['Evento'].str.contains('Bruto', case=False, na=False)]['Valor'].sum()
+                liquido_oficial = holerite_view[holerite_view['Evento'].str.contains('Líquido', case=False, na=False)]['Valor'].sum()
+
+                # 2. Separar eventos de proventos e descontos para as tabelas
+                # Removemos Bruto, Líquido e Base das tabelas de detalhes
+                filtro_tabelas = 'Bruto|Líquido|Base'
+                eventos = holerite_view[~holerite_view['Evento'].str.contains(filtro_tabelas, case=False, na=False)]
                 
-                proventos = eventos[eventos['Valor'] > 0][['Evento', 'Valor']]
+                # Proventos: Valores positivos (exclui os falsos proventos se estiverem chamados de 'Outros Descontos')
+                proventos = eventos[(eventos['Valor'] > 0) & ~(eventos['Evento'].str.contains('Outros Descontos', case=False, na=False))][['Evento', 'Valor']]
+                
+                # Descontos: Valores negativos (inclui os 'Outros Descontos' reais)
                 descontos = eventos[eventos['Valor'] < 0][['Evento', 'Valor']]
                 
                 col_prov, col_desc = st.columns(2)
@@ -228,14 +234,22 @@ if file_detalhe is not None and file_holerite is not None:
                     proventos_fmt = proventos.copy()
                     proventos_fmt['Valor'] = proventos_fmt['Valor'].apply(lambda x: f"R$ {x:,.2f}".replace('.', ','))
                     st.dataframe(proventos_fmt, hide_index=True, use_container_width=True)
-                    st.write(f"**Total Proventos Calculado:** R$ {proventos['Valor'].sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    st.write(f"**Soma (Proventos):** R$ {proventos['Valor'].sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
                 with col_desc:
                     st.error("🔴 DESCONTOS")
                     descontos_fmt = descontos.copy()
                     descontos_fmt['Valor'] = descontos_fmt['Valor'].apply(lambda x: f"R$ {x:,.2f}".replace('.', ','))
                     st.dataframe(descontos_fmt, hide_index=True, use_container_width=True)
-                    st.write(f"**Total Descontos Calculado:** R$ {descontos['Valor'].sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    st.write(f"**Soma (Descontos):** R$ {descontos['Valor'].sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+
+                # 3. Painel de Resumo Final
+                st.markdown("---")
+                st.markdown("#### 💰 Resumo do Holerite")
+                res_col1, res_col2, res_col3 = st.columns(3)
+                res_col1.metric("Salário Bruto", f"R$ {bruto_oficial:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+                res_col2.metric("Total de Descontos", f"R$ {descontos['Valor'].sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+                res_col3.metric("Salário Líquido", f"R$ {liquido_oficial:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
         # -----------------------------------------------------------------------------
         # MÓDULO 4: SIMULADOR DE IMPACTO (MESA DE NEGOCIAÇÃO)
