@@ -259,22 +259,13 @@ if file_detalhe is not None and file_holerite is not None:
             st.header("Simulador de Impacto Financeiro")
             st.markdown("Utilize esta ferramenta para simular o impacto de propostas sindicais ou da prefeitura na folha de pagamento.")
 
-            # Identificar rubricas principais (Salário e Vale Alimentação baseado na amostra)
-            # Vamos assumir que "SALARIO" ou "VENCIMENTO" é o base. 
-            nome_rubrica_salario = st.selectbox("Qual rubrica representa o Salário Base no arquivo de Holerite?", 
-                                                options=['SALARIO', 'VENCIMENTO', 'VENCIMENTOS'], index=0)
+            # Preparar lista de proventos reais para a seleção do usuário
+            filtro_exclusao = 'Bruto|Líquido|Base'
+            df_holerite_limpo = df_holerite[~df_holerite['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
+            df_holerite_limpo = df_holerite_limpo[~((df_holerite_limpo['Valor'] > 0) & (df_holerite_limpo['Evento'].str.contains('Outros Descontos', case=False, na=False)))]
             
-            nome_rubrica_va = st.selectbox("Qual rubrica representa o Vale/Auxílio Alimentação?", 
-                                                options=['AUXILIO ALIMENTACAO', 'VALE ALIMENTACAO'], index=0)
-
-            # Custos Atuais
-            custo_total_atual = df_detalhe['Salário Bruto'].sum()
-            base_salarial_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_salario.upper()]
-            custo_base_atual = base_salarial_atual_df['Valor'].sum()
-            
-            va_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_va.upper()]
-            custo_va_atual = va_atual_df['Valor'].sum()
-            qtd_servidores_va = va_atual_df['Matrícula'].nunique()
+            proventos_unicos = df_holerite_limpo[df_holerite_limpo['Valor'] > 0]['Evento'].dropna().unique().tolist()
+            proventos_unicos.sort()
 
             st.markdown("---")
             st.subheader("Configuração da Proposta")
@@ -282,23 +273,50 @@ if file_detalhe is not None and file_holerite is not None:
             col_sim1, col_sim2 = st.columns(2)
             
             with col_sim1:
-                st.markdown("**1. Reajuste Salarial Linear**")
-                reajuste_perc = st.slider("Percentual de Reajuste no Salário Base (%):", min_value=0.0, max_value=25.0, value=0.0, step=0.1)
+                st.markdown("**1. Reajuste Salarial (Percentual)**")
+                reajuste_perc = st.slider("Percentual de Reajuste (%):", min_value=0.0, max_value=25.0, value=0.0, step=0.1)
+                
+                # Identifica rubricas padrão para sugerir na seleção múltipla
+                palavras_chave_padrao = ['SALARIO', 'VENCIMENTO', 'TEMPO', 'ANUENIO', 'QUINQUENIO', 'COMBUSTIVEL']
+                default_rubricas = [r for r in proventos_unicos if any(k in r.upper() for k in palavras_chave_padrao)]
+                
+                rubricas_reajuste = st.multiselect(
+                    "Selecione as rubricas que sofrerão este reajuste proporcional (efeito cascata):",
+                    options=proventos_unicos,
+                    default=default_rubricas,
+                    help="Selecione o salário base e todas as gratificações/adicionais (ex: Anuênios, Aux. Combustível) que aumentam proporcionalmente quando o base sobe."
+                )
             
             with col_sim2:
-                st.markdown("**2. Política de Benefícios**")
-                # Se não todos têm VA, precisamos saber o valor unitário. Vamos pegar a média/moda para o slider.
+                st.markdown("**2. Política de Benefícios (Fixo)**")
+                # Tenta achar a rubrica de VA padrão
+                opcoes_va = [r for r in proventos_unicos if 'ALIMENTA' in r.upper() or 'REFEICAO' in r.upper()]
+                indice_va = proventos_unicos.index(opcoes_va[0]) if opcoes_va else 0
+                
+                nome_rubrica_va = st.selectbox("Qual rubrica representa o Vale/Auxílio Alimentação?", 
+                                                options=proventos_unicos, index=indice_va)
+
+                va_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_va.upper()]
                 valor_va_medio_atual = va_atual_df['Valor'].mean() if not va_atual_df.empty else 0
+                
                 st.write(f"*(Valor médio atual praticado: R$ {valor_va_medio_atual:.2f})*")
                 aumento_va_fixo = st.number_input("Aumento FIXO no Vale Alimentação por Servidor (R$):", min_value=0.0, value=0.0, step=10.0)
+                aplicar_va_todos = st.checkbox("Aplicar aumento de VA para TODOS os servidores ativos (mesmo os que hoje não recebem)?")
 
-            # Cálculos da Simulação
-            # Impacto 1: Reajuste sobre o base (Gera reflexos em anuênios, horas extras, etc, mas aqui simulamos o impacto direto sobre a rubrica)
-            impacto_mensal_salario = custo_base_atual * (reajuste_perc / 100)
+            # Custos Atuais
+            custo_total_atual = df_detalhe['Salário Bruto'].sum()
             
-            # Impacto 2: Aumento no VA para quem já recebe (ou pode considerar todos os ativos)
-            # Para segurança orçamentária, prefeituras costumam multiplicar pelo total de ativos.
-            aplicar_va_todos = st.checkbox("Aplicar aumento de VA para TODOS os servidores ativos (mesmo os que hoje não recebem)?")
+            # Cálculo Impacto 1: Reajuste sobre todas as rubricas selecionadas
+            if rubricas_reajuste:
+                base_salarial_atual_df = df_holerite[df_holerite['Evento'].isin(rubricas_reajuste)]
+                custo_base_atual = base_salarial_atual_df['Valor'].sum()
+                impacto_mensal_salario = custo_base_atual * (reajuste_perc / 100)
+            else:
+                custo_base_atual = 0
+                impacto_mensal_salario = 0
+            
+            # Cálculo Impacto 2: Aumento no VA
+            qtd_servidores_va = va_atual_df['Matrícula'].nunique()
             if aplicar_va_todos:
                 impacto_mensal_va = df_detalhe['Matrícula'].nunique() * aumento_va_fixo
             else:
@@ -322,7 +340,7 @@ if file_detalhe is not None and file_holerite is not None:
             # Gráfico de cascata (Waterfall) para mostrar a transição
             with st.expander("Ver Gráfico de Composição do Aumento"):
                 dados_waterfall = pd.DataFrame({
-                    'Etapa': ['Custo Atual', 'Reajuste Salarial', 'Aumento VA', 'Custo Projetado'],
+                    'Etapa': ['Custo Atual', 'Reajuste Salarial/Proporcionais', 'Aumento VA', 'Custo Projetado'],
                     'Valor': [custo_total_atual, impacto_mensal_salario, impacto_mensal_va, custo_total_atual + impacto_mensal_total],
                     'Measure': ['absolute', 'relative', 'relative', 'total']
                 })
@@ -339,7 +357,7 @@ if file_detalhe is not None and file_holerite is not None:
                 fig_wf.update_layout(title="Transição do Custo da Folha Mensal (em Milhões)")
                 st.plotly_chart(fig_wf, use_container_width=True)
 
-            st.caption("*Nota: Esta simulação calcula o impacto financeiro direto bruto sobre as rubricas selecionadas. Impactos indiretos em encargos patronais (INSS/Regime Próprio) dependem da legislação local e devem ser acrescidos à margem.*")
+            st.caption("*Nota: Esta simulação calcula o impacto financeiro direto bruto sobre as rubricas selecionadas.*")
 
             # ---------------------------------------------------------
             # NOVA SEÇÃO: HOLERITE SIMULADO INDIVIDUAL
@@ -386,9 +404,10 @@ if file_detalhe is not None and file_holerite is not None:
                     # Prepara a coluna de simulação
                     eventos_sim['Valor Simulado'] = eventos_sim['Valor'].copy()
                     
-                    # 1. Aplica o reajuste no Salário Base
-                    mask_salario = eventos_sim['Evento'].str.upper() == nome_rubrica_salario.upper()
-                    eventos_sim.loc[mask_salario, 'Valor Simulado'] = eventos_sim.loc[mask_salario, 'Valor'] * (1 + (reajuste_perc / 100))
+                    # 1. Aplica o reajuste proporcional em TODAS as rubricas selecionadas no multiselect
+                    mask_proporcionais = eventos_sim['Evento'].isin(rubricas_reajuste)
+                    if mask_proporcionais.any():
+                        eventos_sim.loc[mask_proporcionais, 'Valor Simulado'] = eventos_sim.loc[mask_proporcionais, 'Valor'] * (1 + (reajuste_perc / 100))
                     
                     # 2. Aplica o aumento do Vale Alimentação
                     mask_va = eventos_sim['Evento'].str.upper() == nome_rubrica_va.upper()
@@ -415,7 +434,7 @@ if file_detalhe is not None and file_holerite is not None:
                     total_prov_simulado = prov_sim['Valor Simulado'].sum()
                     
                     total_desc_atual = desc_sim['Valor'].sum()
-                    # Mantemos o desconto simulado igual ao atual por padrão. (Para atualizar imposto demandaria as faixas do IR/INSS)
+                    # Mantemos o desconto simulado igual ao atual por padrão.
                     total_desc_simulado = desc_sim['Valor Simulado'].sum() 
                     
                     liquido_atual = total_prov_atual + total_desc_atual
@@ -430,20 +449,34 @@ if file_detalhe is not None and file_holerite is not None:
                     perc_ganho = ((liquido_simulado / liquido_atual) - 1) * 100 if liquido_atual > 0 else 0
                     col_res3.metric("Aumento Real no Bolso", f"{perc_ganho:.2f}%")
 
-                    # Tabela Comparativa de Proventos
-                    st.markdown("**Comparativo Detalhado (Proventos)**")
+                    # Tabela Comparativa de Proventos e Descontos
+                    st.markdown("---")
+                    st.markdown("#### 📄 Detalhamento do Holerite Simulado")
                     
-                    tabela_comparativa = prov_sim[['Evento', 'Valor', 'Valor Simulado']].copy()
-                    tabela_comparativa.columns = ['Rubrica', 'Valor Atual (R$)', 'Valor Simulado (R$)']
+                    col_prov_sim, col_desc_sim = st.columns(2)
                     
-                    # Função para formatar moeda na tabela
                     def formata_moeda(val):
                         return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                    
-                    tabela_comparativa['Valor Atual (R$)'] = tabela_comparativa['Valor Atual (R$)'].apply(formata_moeda)
-                    tabela_comparativa['Valor Simulado (R$)'] = tabela_comparativa['Valor Simulado (R$)'].apply(formata_moeda)
-                    
-                    st.dataframe(tabela_comparativa, hide_index=True, use_container_width=True)
+                        
+                    with col_prov_sim:
+                        st.success("🟢 PROVENTOS")
+                        tab_prov = prov_sim[['Evento', 'Valor', 'Valor Simulado']].copy()
+                        tab_prov.columns = ['Rubrica', 'Atual (R$)', 'Simulado (R$)']
+                        tab_prov['Atual (R$)'] = tab_prov['Atual (R$)'].apply(formata_moeda)
+                        tab_prov['Simulado (R$)'] = tab_prov['Simulado (R$)'].apply(formata_moeda)
+                        st.dataframe(tab_prov, hide_index=True, use_container_width=True)
+                        st.write(f"**Total Proventos Atual:** {formata_moeda(total_prov_atual)}")
+                        st.write(f"**Total Proventos Simulado:** {formata_moeda(total_prov_simulado)}")
+
+                    with col_desc_sim:
+                        st.error("🔴 DESCONTOS")
+                        tab_desc = desc_sim[['Evento', 'Valor', 'Valor Simulado']].copy()
+                        tab_desc.columns = ['Rubrica', 'Atual (R$)', 'Simulado (R$)']
+                        tab_desc['Atual (R$)'] = tab_desc['Atual (R$)'].apply(formata_moeda)
+                        tab_desc['Simulado (R$)'] = tab_desc['Simulado (R$)'].apply(formata_moeda)
+                        st.dataframe(tab_desc, hide_index=True, use_container_width=True)
+                        st.write(f"**Total Descontos Atual:** {formata_moeda(total_desc_atual)}")
+                        st.write(f"**Total Descontos Simulado:** {formata_moeda(total_desc_simulado)}")
                     
                     st.caption("ℹ️ *Aviso: Esta simulação individual reflete o aumento bruto das rubricas selecionadas. Os descontos de impostos (IRRF e Previdência) foram mantidos com os valores atuais. Na vida real, o aumento do salário base pode gerar mudança de alíquota no imposto de renda, alterando ligeiramente o valor líquido final.*")
 
