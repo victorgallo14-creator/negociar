@@ -309,7 +309,7 @@ if file_detalhe is not None and file_holerite is not None:
         # =========================================================================
         with tab_simulador:
             st.header("📈 Simulador de Negociação Salarial")
-            st.markdown("Simule propostas considerando os reajustes em cascata nos encargos patronais e descontos (IPML/INSS / Assist. Médica).")
+            st.markdown("Simule propostas considerando os reajustes em cascata nos encargos patronais e descontos.")
 
             # Aplica limpeza centralizada para gerar a lista de opções de configuração
             df_holerite_limpo = limpar_eventos_holerite(df_holerite)
@@ -347,21 +347,35 @@ if file_detalhe is not None and file_holerite is not None:
                         
                     aplicar_va_todos = st.checkbox("Aplicar aumento de VA para TODOS os ativos (mesmo os que não recebem)?")
 
-                # EXPANDER PARA ENCARGOS (IPML/INSS E MÉDICA)
-                with st.expander("⚙️ Configurações Avançadas (Encargos, Previdência e Assistência Médica)"):
-                    st.markdown("Configure os percentuais de desconto e custo patronal que incidem sobre a remuneração base.")
+                # EXPANDER PARA ENCARGOS SEPARADOS (IPML x MÉDICA)
+                with st.expander("⚙️ Configurações Avançadas (Bases de Cálculo, IPML e Assistência Médica)"):
+                    st.markdown("A prefeitura possui regras diferentes para cada desconto. Ajuste as bases de cálculo conforme a realidade.")
                     col_enc1, col_enc2 = st.columns(2)
+                    
                     with col_enc1:
-                        aliquota_ipml_servidor = st.number_input("Previdência (IPML / INSS) - Desconto Servidor (%)", value=14.0, step=0.1)
-                        aliquota_ipml_patronal = st.number_input("Previdência (IPML / INSS) - Custo Patronal Prefeitura (%)", value=14.0, step=0.1)
+                        st.markdown("**Previdência Própria (IPML)**")
+                        aliquota_ipml_servidor = st.number_input("IPML - Desconto Servidor (%)", value=14.0, step=0.1)
+                        aliquota_ipml_patronal = st.number_input("IPML - Custo Patronal Prefeitura (%)", value=14.0, step=0.1)
+                        
+                        padrao_ipml = ['SALARIO', 'VENCIMENTO', 'TEMPO', 'ANUENIO', 'QUINQUENIO']
+                        default_ipml = [r for r in proventos_unicos if any(k in r.upper() for k in padrao_ipml)]
+                        rubricas_base_ipml = st.multiselect(
+                            "Rubricas que formam a Base do IPML:",
+                            options=proventos_unicos, default=default_ipml,
+                            help="O IPML incide essencialmente sobre o Salário Base e adicionais de tempo."
+                        )
+
                     with col_enc2:
+                        st.markdown("**Assistência Médica**")
                         aliquota_medica = st.number_input("Assistência Médica - Desconto (%)", value=5.0, step=0.1)
                         
-                    rubricas_base_encargos = st.multiselect(
-                        "Selecione as rubricas que formam a BASE DE CÁLCULO para a Previdência e Assistência Médica:",
-                        options=proventos_unicos, default=default_rubricas,
-                        help="Geralmente a Previdência incide sobre o salário base e gratificações fixas."
-                    )
+                        excluir_medica = ['ALIMENTACAO', 'REFEICAO', 'TRANSPORTE', 'PASSAGEM', 'FAMILIA']
+                        default_medica = [r for r in proventos_unicos if not any(k in r.upper() for k in excluir_medica)]
+                        rubricas_base_medica = st.multiselect(
+                            "Rubricas que formam a Base da Assist. Médica:",
+                            options=proventos_unicos, default=default_medica,
+                            help="A Assistência Médica costuma incidir sobre quase toda a remuneração (incluindo Insalubridade, Férias), excluindo vales indenizatórios."
+                        )
 
             # CÁLCULOS GLOBAIS
             custo_total_atual = df_detalhe['Salário Bruto'].sum()
@@ -376,26 +390,26 @@ if file_detalhe is not None and file_holerite is not None:
             # 2. Impacto VA
             qtd_servidores_va = va_atual_df['Matrícula'].nunique()
             if tipo_reajuste_va == "Percentual (%)":
-                # Aplica o % sobre a folha atual de VA
                 impacto_mensal_va = va_atual_df['Valor'].sum() * (aumento_va_val / 100)
-                if aplicar_va_todos: # Adiciona um VA médio para quem não tem
+                if aplicar_va_todos: 
                     servidores_sem_va = df_detalhe['Matrícula'].nunique() - qtd_servidores_va
                     impacto_mensal_va += (servidores_sem_va * valor_va_medio_atual * (1 + aumento_va_val/100))
-            else: # Fixo em R$
+            else:
                 if aplicar_va_todos:
                     impacto_mensal_va = df_detalhe['Matrícula'].nunique() * aumento_va_val
                 else:
                     impacto_mensal_va = qtd_servidores_va * aumento_va_val
 
-            # 3. Impacto Patronal (Prefeitura) sobre o aumento
-            base_encargos_atual_prefeitura = df_holerite[df_holerite['Evento'].isin(rubricas_base_encargos)]['Valor'].sum()
-            aumento_base_encargos_prefeitura = base_encargos_atual_prefeitura * (reajuste_perc / 100)
-            impacto_patronal = aumento_base_encargos_prefeitura * (aliquota_ipml_patronal / 100)
+            # 3. Impacto Patronal (Prefeitura) calculado de forma exata sobre as rubricas que são da base do IPML E sofreram reajuste
+            rubricas_afetadas_ipml = list(set(rubricas_base_ipml) & set(rubricas_reajuste))
+            base_patronal_atual = df_holerite[df_holerite['Evento'].isin(rubricas_afetadas_ipml)]['Valor'].sum()
+            aumento_base_ipml = base_patronal_atual * (reajuste_perc / 100)
+            impacto_patronal = aumento_base_ipml * (aliquota_ipml_patronal / 100)
 
             impacto_mensal_total = impacto_mensal_salario + impacto_mensal_va + impacto_patronal
             impacto_anual_total = impacto_mensal_total * 13.3
 
-            # RESULTADOS
+            # RESULTADOS GLOBAIS
             st.markdown("---")
             st.subheader("🌎 Impacto Orçamentário Global (Prefeitura)")
             res_col1, res_col2, res_col3 = st.columns(3)
@@ -407,7 +421,7 @@ if file_detalhe is not None and file_holerite is not None:
 
             with st.expander("📊 Ver Gráfico de Composição do Aumento (Waterfall)"):
                 dados_waterfall = pd.DataFrame({
-                    'Etapa': ['Custo Atual', 'Aumento Proventos', 'Aumento VA', 'Previdência Patronal (Custo Extra)', 'Novo Custo Total'],
+                    'Etapa': ['Custo Atual', 'Aumento Proventos', 'Aumento VA', 'IPML Patronal (Custo Extra)', 'Novo Custo Total'],
                     'Valor': [custo_total_atual, impacto_mensal_salario, impacto_mensal_va, impacto_patronal, custo_total_atual + impacto_mensal_total],
                     'Measure': ['absolute', 'relative', 'relative', 'relative', 'total']
                 })
@@ -419,10 +433,10 @@ if file_detalhe is not None and file_holerite is not None:
                 ))
                 st.plotly_chart(fig_wf, use_container_width=True)
 
-            # SIMULAÇÃO INDIVIDUAL COM DESCONTOS RECALCULADOS
+            # SIMULAÇÃO INDIVIDUAL COM DESCONTOS CORRIGIDOS
             st.markdown("---")
             st.subheader("👤 Simulação de Holerite Individual (Aumento Real)")
-            st.markdown("Veja o reflexo da proposta no contracheque. **Os descontos de Previdência e Assistência Médica serão recalculados** sobre a nova base salarial para mostrar o valor líquido exato.")
+            st.markdown("Veja o reflexo da proposta no contracheque. **As bases de cálculo do IPML e da Assistência Médica estão separadas**, garantindo que a dedução simulada é matematicamente precisa.")
 
             col_busca_sim1, col_busca_sim2 = st.columns([1, 3])
             with col_busca_sim1:
@@ -447,7 +461,6 @@ if file_detalhe is not None and file_holerite is not None:
                 if holerite_sim.empty:
                     st.warning("Sem registro de 'Pagamento Mensal' para este servidor.")
                 else:
-                    # Limpeza centralizada para a simulação
                     eventos_sim = limpar_eventos_holerite(holerite_sim)
                     eventos_sim['Valor Simulado'] = eventos_sim['Valor'].copy()
                     
@@ -468,18 +481,26 @@ if file_detalhe is not None and file_holerite is not None:
                         nova_rubrica = pd.DataFrame([{'Matrícula': mat_servidor_sim, 'Nome': servidor_info_sim['Nome'], 'Tipo de Folha': 'Pagamento Mensal', 'Evento': nome_rubrica_va, 'Valor': 0.0, 'Valor Simulado': valor_injetar}])
                         eventos_sim = pd.concat([eventos_sim, nova_rubrica], ignore_index=True)
 
-                    # 3. Recalcula Descontos (Previdência e Médica)
-                    base_encargos_sim_ind = eventos_sim[eventos_sim['Evento'].isin(rubricas_base_encargos)]['Valor Simulado'].sum()
+                    # 3. Recalcula Descontos Separados (IPML vs Médica vs INSS)
+                    base_ipml_sim_ind = eventos_sim[eventos_sim['Evento'].isin(rubricas_base_ipml)]['Valor Simulado'].sum()
+                    base_medica_sim_ind = eventos_sim[eventos_sim['Evento'].isin(rubricas_base_medica)]['Valor Simulado'].sum()
                     
-                    # Cobre IPML, PREVIDENCIARIO ou I.N.S.S (Celetistas)
-                    mask_prev = eventos_sim['Evento'].str.contains('IPML|PREVID|I\.N\.S\.S', case=False, regex=True)
-                    if mask_prev.any():
-                        eventos_sim.loc[mask_prev, 'Valor Simulado'] = -(base_encargos_sim_ind * (aliquota_ipml_servidor / 100))
+                    # IPML (Regime Próprio = 14% Fixo sobre a Base de IPML)
+                    mask_ipml = eventos_sim['Evento'].str.contains('IPML|PREVIDENCIARIO', case=False, regex=True)
+                    if mask_ipml.any():
+                        eventos_sim.loc[mask_ipml, 'Valor Simulado'] = -(base_ipml_sim_ind * (aliquota_ipml_servidor / 100))
                         
-                    # Cobre ASSISTENCIA MEDICA ESTATUTO ou ASSISTENCIA MEDICA - COMISS.
+                    # INSS (Regime Celetista = Progressivo). Calcula o aumento proporcional para manter justiça.
+                    mask_inss = eventos_sim['Evento'].str.contains('I\.N\.S\.S', case=False, regex=True)
+                    if mask_inss.any():
+                        base_ipml_atual_ind = eventos_sim[eventos_sim['Evento'].isin(rubricas_base_ipml)]['Valor'].sum()
+                        fator = (base_ipml_sim_ind / base_ipml_atual_ind) if base_ipml_atual_ind > 0 else 1.0
+                        eventos_sim.loc[mask_inss, 'Valor Simulado'] = eventos_sim.loc[mask_inss, 'Valor'] * fator
+                        
+                    # ASSISTÊNCIA MÉDICA (5% Fixo sobre a Base Médica Ampla)
                     mask_medica = eventos_sim['Evento'].str.contains('MEDICA', case=False)
                     if mask_medica.any():
-                        eventos_sim.loc[mask_medica, 'Valor Simulado'] = -(base_encargos_sim_ind * (aliquota_medica / 100))
+                        eventos_sim.loc[mask_medica, 'Valor Simulado'] = -(base_medica_sim_ind * (aliquota_medica / 100))
 
                     # 4. Finaliza Totais
                     prov_sim = eventos_sim[eventos_sim['Valor Simulado'] > 0].copy()
@@ -494,7 +515,7 @@ if file_detalhe is not None and file_holerite is not None:
                     col_res2.metric("Líquido SIMULADO", formata_moeda(liquido_simulado), f"+ {formata_moeda(liquido_simulado - liquido_atual)}")
                     col_res3.metric("Aumento REAL no Bolso", f"{((liquido_simulado / liquido_atual) - 1) * 100 if liquido_atual > 0 else 0:.2f}%")
 
-                    with st.expander("📄 Ver Detalhamento do Holerite Simulado (Atenção às alterações em Previdência/Médica)", expanded=True):
+                    with st.expander("📄 Ver Detalhamento do Holerite Simulado", expanded=True):
                         col_prov_sim, col_desc_sim = st.columns(2)
                         with col_prov_sim:
                             st.success("🟢 PROVENTOS")
@@ -510,8 +531,6 @@ if file_detalhe is not None and file_holerite is not None:
                             tab_desc['Atual'] = tab_desc['Atual'].apply(formata_moeda)
                             tab_desc['Simulado'] = tab_desc['Simulado'].apply(formata_moeda)
                             st.dataframe(tab_desc, hide_index=True, use_container_width=True)
-                            
-                    st.caption("ℹ️ *Nota: O recálculo de Imposto de Renda (IRRF) requer análise de faixas progressivas e dedução por dependentes (que não estão no holerite), por isso o IRRF foi mantido constante.*")
 
 else:
     # Tela Inicial
