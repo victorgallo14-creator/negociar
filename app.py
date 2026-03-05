@@ -121,16 +121,19 @@ def formata_moeda(val):
     return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
 
 # Função para gerar o PDF Executivo e Profissional
-def gerar_pdf_bytes(reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_patronal, 
-                    custo_total_atual, impacto_mensal_salario, impacto_mensal_va, 
-                    impacto_patronal, impacto_mensal_total, impacto_anual_total):
+def gerar_pdf_bytes(reajuste_perc, tipo_reajuste_va, aumento_va_val, faixas_va_atuais, mapa_faixas_va, 
+                    valor_va_medio_atual, aliquota_ipml_patronal, custo_total_atual, 
+                    impacto_mensal_salario, impacto_mensal_va, impacto_patronal, 
+                    impacto_mensal_total, impacto_anual_total):
     
     pdf = FPDF()
     pdf.add_page()
     
-    # Helper para corrigir caracteres e acentos no FPDF
+    # Helper para corrigir caracteres e acentos no FPDF, evitando o erro do '?'
     def txt(texto):
-        return str(texto).encode('latin-1', 'replace').decode('latin-1')
+        # Substitui caracteres problemáticos por equivalentes simples antes do encode
+        texto = str(texto).replace('º', 'o').replace('ª', 'a').replace('•', '-')
+        return texto.encode('latin-1', 'replace').decode('latin-1')
 
     # Cabeçalho Institucional
     pdf.set_font("Arial", 'B', 14)
@@ -149,10 +152,10 @@ def gerar_pdf_bytes(reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_p
     pdf.cell(0, 7, txt(" 1. METODOLOGIA E PREMISSAS DE CÁLCULO"), ln=True, fill=True)
     pdf.set_font("Arial", '', 10)
     pdf.ln(2)
-    pdf.multi_cell(0, 5, txt("• Base de Dados: Extração analítica dos arquivos oficiais da folha de pagamento via Portal da Transparência."))
-    pdf.multi_cell(0, 5, txt("• Fator de Anualização (13,3): A estimativa de impacto anualizado é obtida pela multiplicação do acréscimo financeiro mensal pelo fator de 13,3. Esta margem assegura o provisionamento integral dos 12 meses civis, acrescido do pagamento do 13º salário e do acréscimo constitucional de 1/3 (um terço) sobre as férias."))
-    pdf.multi_cell(0, 5, txt("• Encargos Patronais: O cálculo da dívida previdenciária patronal não incide de forma bruta sobre o total da folha. A métrica aplica a alíquota definida (neste cenário, para a Previdência Própria) estritamente sobre a variação positiva das rubricas que compõem a base de cálculo previdenciária fixada em lei."))
-    pdf.multi_cell(0, 5, txt("• Proporcionalidade de Benefícios: Nos casos de ajuste percentual ou estrutural no Vale Alimentação, o algoritmo de simulação respeita as proporcionalidades individuais originais, refletindo redutores de assiduidade ou aplicadores de teto salarial preexistentes."))
+    pdf.multi_cell(0, 5, txt("- Base de Dados: Extração analítica dos arquivos oficiais da folha de pagamento via Portal da Transparência."))
+    pdf.multi_cell(0, 5, txt("- Fator de Anualização (13,3): A estimativa de impacto anualizado é obtida pela multiplicação do acréscimo financeiro mensal pelo fator de 13,3. Esta margem assegura o provisionamento integral dos 12 meses civis, acrescido do pagamento do 13o salário e do acréscimo constitucional de 1/3 (um terço) sobre as férias."))
+    pdf.multi_cell(0, 5, txt("- Encargos Patronais: O cálculo da dívida previdenciária patronal não incide de forma bruta sobre o total da folha. A métrica aplica a alíquota definida (neste cenário, para a Previdência Própria) estritamente sobre a variação positiva das rubricas que compõem a base de cálculo previdenciária fixada em lei."))
+    pdf.multi_cell(0, 5, txt("- Proporcionalidade de Benefícios: Nos casos de ajuste percentual ou estrutural no Vale Alimentação, o algoritmo de simulação respeita as proporcionalidades individuais originais, refletindo redutores de assiduidade ou aplicadores de teto salarial preexistentes."))
     pdf.ln(4)
 
     # 2. Parâmetros
@@ -160,10 +163,24 @@ def gerar_pdf_bytes(reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_p
     pdf.cell(0, 7, txt(" 2. DIRETRIZES DA PROPOSTA PARAMETRIZADA"), ln=True, fill=True)
     pdf.set_font("Arial", '', 10)
     pdf.ln(2)
-    pdf.cell(0, 6, txt(f"  • Correção Incidente no Salário e Adicionais Proporcionais: {reajuste_perc:.2f}%"), ln=True)
-    pdf.cell(0, 6, txt(f"  • Estrutura de Aumento no Vale Alimentação: {detalhe_va}"), ln=True)
-    pdf.cell(0, 6, txt(f"  • Extensão de Concessão do VA a todos os ativos: {'Habilitado' if aplicar_va_todos else 'Não Habilitado'}"), ln=True)
-    pdf.cell(0, 6, txt(f"  • Custo Fixo Parametrizado da Previdência Patronal: {aliquota_ipml_patronal:.2f}%"), ln=True)
+    pdf.cell(0, 6, txt(f"- Correção Incidente no Salário e Adicionais Proporcionais: {reajuste_perc:.2f}%"), ln=True)
+    pdf.cell(0, 6, txt(f"- Custo Fixo Parametrizado da Previdência Patronal: {aliquota_ipml_patronal:.2f}%"), ln=True)
+    pdf.cell(0, 6, txt("- Estrutura de Aumento no Vale Alimentação:"), ln=True)
+    
+    # Detalhamento Antigo x Novo no PDF
+    if tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
+        for faixa in faixas_va_atuais:
+            novo_val = mapa_faixas_va.get(faixa, faixa)
+            pdf.cell(0, 6, txt(f"    * Faixa Atual: {formata_moeda(faixa)}  ->  Novo Valor: {formata_moeda(novo_val)}"), ln=True)
+    elif tipo_reajuste_va == "Percentual (%)":
+        pdf.cell(0, 6, txt(f"    * Ajuste: +{aumento_va_val:.2f}%"), ln=True)
+        nova_media = valor_va_medio_atual * (1 + aumento_va_val/100)
+        pdf.cell(0, 6, txt(f"    * Média Atual Praticada: {formata_moeda(valor_va_medio_atual)}  ->  Nova Média: {formata_moeda(nova_media)}"), ln=True)
+    else:
+        pdf.cell(0, 6, txt(f"    * Ajuste: +{formata_moeda(aumento_va_val)} fixo"), ln=True)
+        nova_media = valor_va_medio_atual + aumento_va_val
+        pdf.cell(0, 6, txt(f"    * Média Atual Praticada: {formata_moeda(valor_va_medio_atual)}  ->  Nova Média: {formata_moeda(nova_media)}"), ln=True)
+        
     pdf.ln(4)
 
     # 3. Cenário Atual
@@ -589,13 +606,22 @@ if file_detalhe is not None and file_holerite is not None:
             st.subheader("📄 Relatório Oficial (Exportação para Mesa de Negociação)")
             st.markdown("Gere um documento formal, metodológico e auditável da simulação para ser anexado em atas, ofícios e documentações legais.")
             
-            # Formatação Dinâmica do Texto do VA para os relatórios
+            # Formatação Dinâmica do Texto do VA mostrando valores antigos e novos
+            valor_va_medio_atual = va_atual_df['Valor'].mean() if not va_atual_df.empty else 0
+            texto_va_txt = ""
+            
             if tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
-                detalhe_va = "Ajuste específico por limites de faixas consolidadas"
+                for faixa in faixas_va_atuais:
+                    novo_val = mapa_faixas_va.get(faixa, faixa)
+                    texto_va_txt += f"  - Faixa Atual: {formata_moeda(faixa)}  ->  Novo Valor: {formata_moeda(novo_val)}\n"
             elif tipo_reajuste_va == "Percentual (%)":
-                detalhe_va = f"{aumento_va_val:.2f}% aplicado proporcionalmente"
+                texto_va_txt += f"  - Ajuste: +{aumento_va_val:.2f}%\n"
+                texto_va_txt += f"  - Média Atual Praticada: {formata_moeda(valor_va_medio_atual)}  ->  Nova Média: {formata_moeda(valor_va_medio_atual * (1 + aumento_va_val/100))}\n"
             else:
-                detalhe_va = f"R$ {aumento_va_val:.2f} (Injeção em formato de Adicional Fixo)"
+                texto_va_txt += f"  - Ajuste: +{formata_moeda(aumento_va_val)} fixo\n"
+                texto_va_txt += f"  - Média Atual Praticada: {formata_moeda(valor_va_medio_atual)}  ->  Nova Média: {formata_moeda(valor_va_medio_atual + aumento_va_val)}\n"
+            
+            texto_va_txt = texto_va_txt.rstrip() # Remove a última quebra de linha
 
             relatorio_texto = f"""================================================================================
         RELATÓRIO TÉCNICO DE IMPACTO ORÇAMENTÁRIO E FINANCEIRO
@@ -616,9 +642,9 @@ if file_detalhe is not None and file_holerite is not None:
 2. DIRETRIZES DA PROPOSTA PARAMETRIZADA
 --------------------------------------------------------------------------------
 - Correção Incidente no Salário e Adicionais: {reajuste_perc:.2f}%
-- Estrutura de Aumento no Vale Alimentação: {detalhe_va}
-- Expansão da Cobertura de Benefícios (VA) aos inativos/não-recebedores: {'Sim' if aplicar_va_todos else 'Não'}
 - Custo Fixo Parametrizado (Previdência Patronal): {aliquota_ipml_patronal:.2f}%
+- Estrutura de Aumento no Vale Alimentação:
+{texto_va_txt}
 
 3. DIAGNÓSTICO DO CENÁRIO BASE ATUAL
 --------------------------------------------------------------------------------
@@ -653,11 +679,12 @@ if file_detalhe is not None and file_holerite is not None:
             
             with col_download_2:
                 if HAS_FPDF:
-                    # Gera os bytes do PDF com as novas premissas técnicas
+                    # Gera os bytes do PDF com as novas premissas e sem bugs de fonte
                     pdf_bytes = gerar_pdf_bytes(
-                        reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_patronal, 
-                        custo_total_atual, impacto_mensal_salario, impacto_mensal_va, 
-                        impacto_patronal, impacto_mensal_total, impacto_anual_total
+                        reajuste_perc, tipo_reajuste_va, aumento_va_val, faixas_va_atuais, mapa_faixas_va, 
+                        valor_va_medio_atual, aliquota_ipml_patronal, custo_total_atual, 
+                        impacto_mensal_salario, impacto_mensal_va, impacto_patronal, 
+                        impacto_mensal_total, impacto_anual_total
                     )
                     st.download_button(
                         label="📄 Baixar Relatório Técnico em PDF (.pdf)",
