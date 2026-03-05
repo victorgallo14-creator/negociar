@@ -213,9 +213,10 @@ if file_detalhe is not None and file_holerite is not None:
                 holerite_view = holerite_servidor[holerite_servidor['Tipo de Folha'] == tipo_folha_selecionada]
                 
                 # Separar eventos informativos de proventos e descontos
-                # Valores positivos são proventos, negativos são descontos. Eventos com 'Salario Bruto' e 'Líquido' são totais.
-                totais = holerite_view[holerite_view['Evento'].str.contains('Bruto|Líquido|Outros Descontos', case=False, na=False)]
-                eventos = holerite_view[~holerite_view['Evento'].str.contains('Bruto|Líquido', case=False, na=False)]
+                # Valores positivos são proventos, negativos são descontos. Filtramos totalizadores e informativos.
+                filtro_exclusao = 'Bruto|Líquido|Outros Descontos|Base'
+                totais = holerite_view[holerite_view['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
+                eventos = holerite_view[~holerite_view['Evento'].str.contains(filtro_exclusao, case=False, na=False)]
                 
                 proventos = eventos[eventos['Valor'] > 0][['Evento', 'Valor']]
                 descontos = eventos[eventos['Valor'] < 0][['Evento', 'Valor']]
