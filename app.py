@@ -414,7 +414,7 @@ if file_detalhe is not None and file_holerite is not None:
             st.subheader("🌎 Impacto Orçamentário Global (Prefeitura)")
             res_col1, res_col2, res_col3 = st.columns(3)
             res_col1.metric("Custo Folha Atual (Mensal)", formata_moeda(custo_total_atual))
-            res_col2.metric("Acréscimo MENSAL Direto", f"+ {formata_moeda(impacto_mensal_total)}", f"{(impacto_mensal_total/custo_total_atual)*100:.2f}% impacto", delta_color="inverse")
+            res_col2.metric("Acréscimo MENSAL Direto", f"+ {formata_moeda(impacto_mensal_total)}", f"{(impacto_mensal_total/custo_total_atual)*100 if custo_total_atual else 0:.2f}% impacto", delta_color="inverse")
             res_col3.metric("Novo Custo (Mensal c/ Patronal)", formata_moeda(custo_total_atual + impacto_mensal_total))
 
             st.error(f"⚠️ **IMPACTO ANUAL NO ORÇAMENTO:** Provisionamento de **{formata_moeda(impacto_anual_total)}** (Considerando reajuste salarial, benefícios e acréscimo de dívida Patronal).")
@@ -432,6 +432,51 @@ if file_detalhe is not None and file_holerite is not None:
                     connector = {"line":{"color":"rgb(63, 63, 63)"}},
                 ))
                 st.plotly_chart(fig_wf, use_container_width=True)
+
+            # EMISSÃO DE RELATÓRIO DO IMPACTO ORÇAMENTÁRIO
+            st.markdown("---")
+            st.subheader("📄 Relatório de Impacto Orçamentário")
+            st.markdown("Gere um resumo textual consolidado da simulação atual para incluir em atas, apresentações ou documentos oficiais.")
+            
+            # Formataçao do Relatório em Texto
+            relatorio_texto = f"""======================================================
+     RELATÓRIO OFICIAL DE IMPACTO ORÇAMENTÁRIO
+======================================================
+
+1. PARÂMETROS DA PROPOSTA
+- Reajuste Salarial: {reajuste_perc:.2f}%
+- Aumento no Vale Alimentação: {aumento_va_val:.2f} ({tipo_reajuste_va})
+- Extensão do VA para todos os ativos: {'Sim' if aplicar_va_todos else 'Não'}
+- Alíquota Previdência (IPML Patronal): {aliquota_ipml_patronal:.2f}%
+
+2. CENÁRIO ATUAL
+- Custo Folha Atual (Mensal): {formata_moeda(custo_total_atual)}
+
+3. COMPOSIÇÃO DO ACRÉSCIMO (MENSAL)
+- Impacto Direto (Salários e Adicionais): {formata_moeda(impacto_mensal_salario)}
+- Impacto no Benefício (Vale Alimentação): {formata_moeda(impacto_mensal_va)}
+- Impacto em Encargos (Custo IPML Extra): {formata_moeda(impacto_patronal)}
+------------------------------------------------------
+- ACRÉSCIMO MENSAL TOTAL ESTIMADO: {formata_moeda(impacto_mensal_total)} (+{(impacto_mensal_total/custo_total_atual)*100 if custo_total_atual else 0:.2f}%)
+
+4. PROJEÇÃO FINAL E ANUALIZADA
+- NOVO CUSTO MENSAL PROJETADO: {formata_moeda(custo_total_atual + impacto_mensal_total)}
+- IMPACTO ANUALIZADO NO ORÇAMENTO: {formata_moeda(impacto_anual_total)}
+
+======================================================
+* Relatório gerado automaticamente pelo Sistema Estratégico de Folha de Pagamento.
+* Nota: A projeção anualizada considera 13.3 folhas (reflexo em 13º e Férias).
+"""
+            
+            # Interface de exibição e download do relatório
+            st.text_area("Pré-visualização do Relatório:", value=relatorio_texto, height=380)
+            
+            st.download_button(
+                label="📥 Baixar Relatório (.txt)",
+                data=relatorio_texto,
+                file_name="Relatorio_Impacto_Orcamentario.txt",
+                mime="text/plain"
+            )
 
             # SIMULAÇÃO INDIVIDUAL COM DESCONTOS CORRIGIDOS
             st.markdown("---")
