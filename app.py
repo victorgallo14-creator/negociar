@@ -269,10 +269,10 @@ if file_detalhe is not None and file_holerite is not None:
 
             # Custos Atuais
             custo_total_atual = df_detalhe['Salário Bruto'].sum()
-            base_salarial_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_salario]
+            base_salarial_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_salario.upper()]
             custo_base_atual = base_salarial_atual_df['Valor'].sum()
             
-            va_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_va]
+            va_atual_df = df_holerite[df_holerite['Evento'].str.upper() == nome_rubrica_va.upper()]
             custo_va_atual = va_atual_df['Valor'].sum()
             qtd_servidores_va = va_atual_df['Matrícula'].nunique()
 
@@ -309,7 +309,7 @@ if file_detalhe is not None and file_holerite is not None:
 
             # Exibição de Resultados
             st.markdown("---")
-            st.subheader("💸 Resultados da Simulação")
+            st.subheader("💸 Resultados Globais da Simulação")
             
             res_col1, res_col2, res_col3 = st.columns(3)
             
@@ -320,26 +320,133 @@ if file_detalhe is not None and file_holerite is not None:
             st.warning(f"⚠️ **IMPACTO ANUAL ESTIMADO NO ORÇAMENTO:** O acréscimo provisionado para o ano (incluindo 13º e Férias proporcionais) é de **R$ {impacto_anual_total:,.2f}**".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
             # Gráfico de cascata (Waterfall) para mostrar a transição
-            st.markdown("#### Composição do Aumento")
-            dados_waterfall = pd.DataFrame({
-                'Etapa': ['Custo Atual', 'Reajuste Salarial', 'Aumento VA', 'Custo Projetado'],
-                'Valor': [custo_total_atual, impacto_mensal_salario, impacto_mensal_va, custo_total_atual + impacto_mensal_total],
-                'Measure': ['absolute', 'relative', 'relative', 'total']
-            })
+            with st.expander("Ver Gráfico de Composição do Aumento"):
+                dados_waterfall = pd.DataFrame({
+                    'Etapa': ['Custo Atual', 'Reajuste Salarial', 'Aumento VA', 'Custo Projetado'],
+                    'Valor': [custo_total_atual, impacto_mensal_salario, impacto_mensal_va, custo_total_atual + impacto_mensal_total],
+                    'Measure': ['absolute', 'relative', 'relative', 'total']
+                })
 
-            fig_wf = go.Figure(go.Waterfall(
-                name = "20", orientation = "v",
-                measure = dados_waterfall['Measure'],
-                x = dados_waterfall['Etapa'],
-                textposition = "outside",
-                text = dados_waterfall['Valor'].apply(lambda x: f"R$ {x/1000000:.2f}M"),
-                y = dados_waterfall['Valor'],
-                connector = {"line":{"color":"rgb(63, 63, 63)"}},
-            ))
-            fig_wf.update_layout(title="Transição do Custo da Folha Mensal (em Milhões)")
-            st.plotly_chart(fig_wf, use_container_width=True)
+                fig_wf = go.Figure(go.Waterfall(
+                    name = "20", orientation = "v",
+                    measure = dados_waterfall['Measure'],
+                    x = dados_waterfall['Etapa'],
+                    textposition = "outside",
+                    text = dados_waterfall['Valor'].apply(lambda x: f"R$ {x/1000000:.2f}M"),
+                    y = dados_waterfall['Valor'],
+                    connector = {"line":{"color":"rgb(63, 63, 63)"}},
+                ))
+                fig_wf.update_layout(title="Transição do Custo da Folha Mensal (em Milhões)")
+                st.plotly_chart(fig_wf, use_container_width=True)
 
             st.caption("*Nota: Esta simulação calcula o impacto financeiro direto bruto sobre as rubricas selecionadas. Impactos indiretos em encargos patronais (INSS/Regime Próprio) dependem da legislação local e devem ser acrescidos à margem.*")
+
+            # ---------------------------------------------------------
+            # NOVA SEÇÃO: HOLERITE SIMULADO INDIVIDUAL
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("👤 Simulação Individual (Holerite Simulado)")
+            st.markdown("Pesquise um servidor para ver como o salário dele ficará com a proposta que você acabou de configurar acima.")
+
+            col_busca_sim1, col_busca_sim2 = st.columns(2)
+            with col_busca_sim1:
+                tipo_busca_sim = st.radio("Buscar servidor por:", ["Nome", "Matrícula"], key="radio_busca_sim")
+            
+            with col_busca_sim2:
+                if tipo_busca_sim == "Nome":
+                    nomes_sim = sorted(df_detalhe_full['Nome'].dropna().unique())
+                    selecao_sim = st.selectbox("Selecione o nome:", nomes_sim, key="select_nome_sim")
+                else:
+                    matriculas_sim = sorted(df_detalhe_full['Matrícula'].dropna().unique())
+                    selecao_sim = st.selectbox("Selecione a matrícula:", matriculas_sim, key="select_mat_sim")
+
+            if selecao_sim:
+                # Obter dados do servidor
+                if tipo_busca_sim == "Nome":
+                    servidor_info_sim = df_detalhe_full[df_detalhe_full['Nome'] == selecao_sim].iloc[0]
+                    mat_servidor_sim = servidor_info_sim['Matrícula']
+                else:
+                    servidor_info_sim = df_detalhe_full[df_detalhe_full['Matrícula'] == selecao_sim].iloc[0]
+                    mat_servidor_sim = selecao_sim
+
+                st.markdown(f"**Holerite Simulado para:** {servidor_info_sim['Nome']} (Matrícula: {mat_servidor_sim})")
+                
+                # Resgatar folha mensal deste servidor
+                holerite_sim = df_holerite_full[(df_holerite_full['Matrícula'] == mat_servidor_sim) & 
+                                                (df_holerite_full['Tipo de Folha'].astype(str).str.contains('Mensal', case=False, na=False))]
+                
+                if holerite_sim.empty:
+                    st.warning("Este servidor não possui registro de 'Pagamento Mensal' no arquivo de holerites para realizar a simulação.")
+                else:
+                    # Filtra apenas eventos reais (tira os totais e informações de base da prefeitura)
+                    filtro_exclusao = 'Bruto|Líquido|Base'
+                    eventos_sim = holerite_sim[~holerite_sim['Evento'].str.contains(filtro_exclusao, case=False, na=False)].copy()
+                    eventos_sim = eventos_sim[~((eventos_sim['Valor'] > 0) & (eventos_sim['Evento'].str.contains('Outros Descontos', case=False, na=False)))]
+                    
+                    # Prepara a coluna de simulação
+                    eventos_sim['Valor Simulado'] = eventos_sim['Valor'].copy()
+                    
+                    # 1. Aplica o reajuste no Salário Base
+                    mask_salario = eventos_sim['Evento'].str.upper() == nome_rubrica_salario.upper()
+                    eventos_sim.loc[mask_salario, 'Valor Simulado'] = eventos_sim.loc[mask_salario, 'Valor'] * (1 + (reajuste_perc / 100))
+                    
+                    # 2. Aplica o aumento do Vale Alimentação
+                    mask_va = eventos_sim['Evento'].str.upper() == nome_rubrica_va.upper()
+                    if mask_va.any():
+                        # Já recebe VA, apenas soma o aumento
+                        eventos_sim.loc[mask_va, 'Valor Simulado'] = eventos_sim.loc[mask_va, 'Valor'] + aumento_va_fixo
+                    elif aplicar_va_todos and aumento_va_fixo > 0:
+                        # Não recebe VA, mas o aumento foi parametrizado para todos os ativos. Adicionamos a rubrica!
+                        nova_rubrica = pd.DataFrame([{
+                            'Matrícula': mat_servidor_sim,
+                            'Nome': servidor_info_sim['Nome'],
+                            'Tipo de Folha': 'Pagamento Mensal',
+                            'Evento': nome_rubrica_va,
+                            'Valor': 0.0,
+                            'Valor Simulado': aumento_va_fixo
+                        }])
+                        eventos_sim = pd.concat([eventos_sim, nova_rubrica], ignore_index=True)
+
+                    # Separar Proventos para exibição (Simulação afeta mais os proventos)
+                    prov_sim = eventos_sim[eventos_sim['Valor Simulado'] > 0].copy()
+                    desc_sim = eventos_sim[eventos_sim['Valor Simulado'] < 0].copy()
+                    
+                    total_prov_atual = prov_sim['Valor'].sum()
+                    total_prov_simulado = prov_sim['Valor Simulado'].sum()
+                    
+                    total_desc_atual = desc_sim['Valor'].sum()
+                    # Mantemos o desconto simulado igual ao atual por padrão. (Para atualizar imposto demandaria as faixas do IR/INSS)
+                    total_desc_simulado = desc_sim['Valor Simulado'].sum() 
+                    
+                    liquido_atual = total_prov_atual + total_desc_atual
+                    liquido_simulado = total_prov_simulado + total_desc_simulado
+                    diferenca_liquida = liquido_simulado - liquido_atual
+
+                    # Painel de Resultados do Servidor
+                    col_res1, col_res2, col_res3 = st.columns(3)
+                    col_res1.metric("Líquido ATUAL", f"R$ {liquido_atual:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+                    col_res2.metric("Líquido SIMULADO", f"R$ {liquido_simulado:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'), f"+ R$ {diferenca_liquida:,.2f}".replace('.', ','))
+                    
+                    perc_ganho = ((liquido_simulado / liquido_atual) - 1) * 100 if liquido_atual > 0 else 0
+                    col_res3.metric("Aumento Real no Bolso", f"{perc_ganho:.2f}%")
+
+                    # Tabela Comparativa de Proventos
+                    st.markdown("**Comparativo Detalhado (Proventos)**")
+                    
+                    tabela_comparativa = prov_sim[['Evento', 'Valor', 'Valor Simulado']].copy()
+                    tabela_comparativa.columns = ['Rubrica', 'Valor Atual (R$)', 'Valor Simulado (R$)']
+                    
+                    # Função para formatar moeda na tabela
+                    def formata_moeda(val):
+                        return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    
+                    tabela_comparativa['Valor Atual (R$)'] = tabela_comparativa['Valor Atual (R$)'].apply(formata_moeda)
+                    tabela_comparativa['Valor Simulado (R$)'] = tabela_comparativa['Valor Simulado (R$)'].apply(formata_moeda)
+                    
+                    st.dataframe(tabela_comparativa, hide_index=True, use_container_width=True)
+                    
+                    st.caption("ℹ️ *Aviso: Esta simulação individual reflete o aumento bruto das rubricas selecionadas. Os descontos de impostos (IRRF e Previdência) foram mantidos com os valores atuais. Na vida real, o aumento do salário base pode gerar mudança de alíquota no imposto de renda, alterando ligeiramente o valor líquido final.*")
+
 
 else:
     # Tela Inicial antes do Upload
