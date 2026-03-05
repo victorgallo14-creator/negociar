@@ -2,6 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import io
+
+# Tentar importar fpdf para geração do PDF
+try:
+    from fpdf import FPDF
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
 
 # Configuração inicial da página
 st.set_page_config(
@@ -111,6 +119,104 @@ def load_data(file_detalhe, file_holerite, file_holerite_2=None):
 
 def formata_moeda(val):
     return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+
+# Função para gerar o PDF bonitão
+def gerar_pdf_bytes(reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_patronal, 
+                    custo_total_atual, impacto_mensal_salario, impacto_mensal_va, 
+                    impacto_patronal, impacto_mensal_total, impacto_anual_total):
+    
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Helper para corrigir caracteres e acentos
+    def txt(texto):
+        return str(texto).encode('latin-1', 'replace').decode('latin-1')
+
+    # Cabeçalho
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(31, 119, 180) # Azul
+    pdf.cell(0, 10, txt("ESTUDO DE IMPACTO ORÇAMENTÁRIO"), ln=True, align='C')
+    pdf.set_font("Arial", '', 11)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, txt("Simulação Oficial de Folha de Pagamento Municipal"), ln=True, align='C')
+    pdf.line(10, 30, 200, 30)
+    pdf.ln(10)
+
+    # 1. Parâmetros
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(0, 8, txt(" 1. PARÂMETROS DA PROPOSTA"), ln=True, fill=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(0, 7, txt(f"  • Reajuste Salarial: {reajuste_perc:.2f}%"), ln=True)
+    pdf.cell(0, 7, txt(f"  • Aumento Vale Alimentação: {detalhe_va}"), ln=True)
+    pdf.cell(0, 7, txt(f"  • Estender VA para todos: {'Sim' if aplicar_va_todos else 'Não'}"), ln=True)
+    pdf.cell(0, 7, txt(f"  • Custo Previdência Patronal (IPML): {aliquota_ipml_patronal:.2f}%"), ln=True)
+    pdf.ln(5)
+
+    # 2. Cenário Atual
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, txt(" 2. CENÁRIO BASE ATUAL"), ln=True, fill=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(140, 7, txt("  Custo da Folha Atual (Mensal):"))
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 7, txt(formata_moeda(custo_total_atual)), ln=True, align='R')
+    pdf.ln(5)
+
+    # 3. Composição
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, txt(" 3. COMPOSIÇÃO DO ACRÉSCIMO (MENSAL)"), ln=True, fill=True)
+    
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(140, 7, txt("  Impacto Direto (Salários e Adicionais Proporcionais):"))
+    pdf.cell(0, 7, txt(formata_moeda(impacto_mensal_salario)), ln=True, align='R')
+    
+    pdf.cell(140, 7, txt("  Impacto no Benefício (Vale Alimentação):"))
+    pdf.cell(0, 7, txt(formata_moeda(impacto_mensal_va)), ln=True, align='R')
+    
+    pdf.cell(140, 7, txt("  Impacto em Encargos (Acréscimo Dívida Patronal):"))
+    pdf.cell(0, 7, txt(formata_moeda(impacto_patronal)), ln=True, align='R')
+    
+    pdf.line(10, pdf.get_y()+2, 200, pdf.get_y()+2)
+    pdf.ln(4)
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(214, 39, 40) # Vermelho
+    pdf.cell(140, 8, txt("  ACRÉSCIMO MENSAL TOTAL ESTIMADO:"))
+    pdf.cell(0, 8, txt(formata_moeda(impacto_mensal_total)), ln=True, align='R')
+    
+    pct_impacto = (impacto_mensal_total/custo_total_atual)*100 if custo_total_atual else 0
+    pdf.set_font("Arial", 'I', 10)
+    pdf.cell(0, 6, txt(f"  (Representa um aumento de +{pct_impacto:.2f}% na folha atual)"), ln=True, align='R')
+    pdf.ln(5)
+
+    # 4. Projeções
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, txt(" 4. PROJEÇÕES FINANCEIRAS"), ln=True, fill=True)
+    
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(140, 8, txt("  Novo Custo Folha (Mensal):"))
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, txt(formata_moeda(custo_total_atual + impacto_mensal_total)), ln=True, align='R')
+    
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(140, 8, txt("  IMPACTO ANUALIZADO NO ORÇAMENTO (Provisionamento):"))
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, txt(formata_moeda(impacto_anual_total)), ln=True, align='R')
+    
+    # Rodapé / Nota Metodológica
+    pdf.set_y(-30)
+    pdf.set_font("Arial", 'I', 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.multi_cell(0, 4, txt("Nota Metodológica: A projeção anualizada considera 12 folhas mensais acrescidas de estimativa de 13º salário e 1/3 de férias (fator multiplicador 13.3). O impacto patronal considera apenas o aumento direto da dívida atrelada à rubrica reajustada no mês simulado."))
+    
+    # Processa e garante o output binário
+    pdf_out = pdf.output(dest='S')
+    if isinstance(pdf_out, str):
+        return pdf_out.encode('latin-1')
+    return bytes(pdf_out)
+
 
 # Título da Aplicação
 st.title("🏛️ Sistema Estratégico de Folha de Pagamento")
@@ -465,14 +571,16 @@ if file_detalhe is not None and file_holerite is not None:
                 ))
                 st.plotly_chart(fig_wf, use_container_width=True)
 
-            # EMISSÃO DE RELATÓRIO DO IMPACTO ORÇAMENTÁRIO
+            # =========================================================================
+            # EMISSÃO DE RELATÓRIOS OFICIAIS (TXT e PDF)
+            # =========================================================================
             st.markdown("---")
-            st.subheader("📄 Relatório de Impacto Orçamentário")
-            st.markdown("Gere um resumo textual consolidado da simulação atual para incluir em atas, apresentações ou documentos oficiais.")
+            st.subheader("📄 Relatório Oficial (Exportação para Mesa de Negociação)")
+            st.markdown("Gere um documento formal da simulação atual para ser anexado em atas, ofícios e apresentações.")
             
-            # Formatação Dinâmica do Texto do VA
+            # Formatação Dinâmica do Texto do VA para os relatórios
             if tipo_reajuste_va == "Por Faixas (Valores Diferentes)":
-                detalhe_va = "Ajuste específico por faixas (Valores Individuais)"
+                detalhe_va = "Ajuste específico por faixas"
             elif tipo_reajuste_va == "Percentual (%)":
                 detalhe_va = f"{aumento_va_val:.2f}% sobre valor atual"
             else:
@@ -505,17 +613,37 @@ if file_detalhe is not None and file_holerite is not None:
 ======================================================
 * Relatório gerado automaticamente pelo Sistema Estratégico de Folha de Pagamento.
 * Nota: A projeção anualizada considera 13.3 folhas (reflexo em 13º e Férias).
-"""
+"""         
+            col_download_1, col_download_2 = st.columns(2)
             
-            # Interface de exibição e download do relatório
-            st.text_area("Pré-visualização do Relatório:", value=relatorio_texto, height=380)
+            with col_download_1:
+                st.download_button(
+                    label="📥 Baixar Resumo Simples em Texto (.txt)",
+                    data=relatorio_texto,
+                    file_name="Relatorio_Impacto_Orcamentario.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
             
-            st.download_button(
-                label="📥 Baixar Relatório (.txt)",
-                data=relatorio_texto,
-                file_name="Relatorio_Impacto_Orcamentario.txt",
-                mime="text/plain"
-            )
+            with col_download_2:
+                if HAS_FPDF:
+                    # Gera os bytes do PDF na hora de clicar
+                    pdf_bytes = gerar_pdf_bytes(
+                        reajuste_perc, detalhe_va, aplicar_va_todos, aliquota_ipml_patronal, 
+                        custo_total_atual, impacto_mensal_salario, impacto_mensal_va, 
+                        impacto_patronal, impacto_mensal_total, impacto_anual_total
+                    )
+                    st.download_button(
+                        label="📄 Baixar Relatório Oficial em PDF (.pdf)",
+                        data=pdf_bytes,
+                        file_name="Relatorio_Impacto_Orcamentario.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                else:
+                    st.error("⚠️ Biblioteca 'fpdf' não instalada.")
+                    st.info("Para gerar o PDF bonito, abra o terminal e digite: `pip install fpdf`")
+
 
             # SIMULAÇÃO INDIVIDUAL COM DESCONTOS CORRIGIDOS E FAIXAS DE VA
             st.markdown("---")
