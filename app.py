@@ -279,6 +279,7 @@ if file_detalhe is not None and file_holerite is not None:
             "🏢 Análise por Secretaria", 
             "📄 Consulta de Holerite", 
             "📈 Simulador de Negociação"
+            "🍎 Negociação de Auxílio"
         ])
 
         # =========================================================================
@@ -437,6 +438,93 @@ if file_detalhe is not None and file_holerite is not None:
                 res_col1.metric(f"Salário Bruto{label_sufixo}", formata_moeda(bruto_calculado))
                 res_col2.metric(f"Total de Descontos{label_sufixo}", formata_moeda(descontos_calculado))
                 res_col3.metric(f"Salário Líquido{label_sufixo}", formata_moeda(liquido_calculado))
+
+        # =========================================================================
+        # ABA 5: NEGOCIAÇÃO EXCLUSIVA DE AUXÍLIO ALIMENTAÇÃO
+        # =========================================================================
+        with tab_auxilio:
+            st.header("🍎 Negociação Específica: Auxílio Alimentação")
+            st.markdown("Analise quem recebe o benefício por cargo e simule reajustes focados no vale-alimentação.")
+
+            # 1. Identificação da Rubrica (Reaproveitando a lógica anterior)
+            opcoes_va_neg = [r for r in proventos_unicos if 'ALIMENTA' in r.upper() or 'REFEICAO' in r.upper()]
+            indice_va_neg = proventos_unicos.index(opcoes_va_neg[0]) if opcoes_va_neg else 0
+            rubrica_va_neg = st.selectbox("Selecione a rubrica para análise:", options=proventos_unicos, index=indice_va_neg, key="va_neg_select")
+
+            # 2. Cruzamento de Dados (Holerite + Detalhe para pegar o Cargo)
+            # Filtramos o holerite apenas para a rubrica de VA selecionada
+            df_va_apenas = df_holerite[df_holerite['Evento'].str.upper() == rubrica_va_neg.upper()]
+            
+            # Unimos com df_detalhe para trazer a coluna 'Cargo'
+            df_va_cargo = df_va_apenas.merge(df_detalhe[['Matrícula', 'Cargo']], on='Matrícula', how='inner')
+
+            if df_va_cargo.empty:
+                st.warning("Nenhum registro encontrado para esta rubrica nos dados carregados.")
+            else:
+                # 3. Agrupamento por Cargo e Valor Atual
+                resumo_va = df_va_cargo.groupby(['Cargo', 'Valor']).agg(
+                    Quantidade=('Matrícula', 'count')
+                ).reset_index().sort_values('Quantidade', ascending=False)
+
+                st.subheader("📋 Censo Atual do Benefício")
+                st.write(f"Total de servidores recebendo '{rubrica_va_neg}': **{resumo_va['Quantidade'].sum()}**")
+
+                # 4. Configuração da Simulação
+                with st.container(border=True):
+                    st.subheader("⚡ Simulador de Reajuste")
+                    col_neg1, col_neg2 = st.columns(2)
+                    
+                    with col_neg1:
+                        modo_sim = st.radio("Forma de Reajuste:", ["Valor Fixo (Soma)", "Percentual (%)"], horizontal=True)
+                    with col_neg2:
+                        if modo_sim == "Valor Fixo (Soma)":
+                            valor_input = st.number_input("Somar quanto ao valor atual (R$):", min_value=0.0, value=50.0, step=5.0)
+                        else:
+                            valor_input = st.number_input("Aumentar percentualmente (%):", min_value=0.0, value=5.0, step=0.5)
+
+                # 5. Cálculo da Projeção
+                if modo_sim == "Valor Fixo (Soma)":
+                    resumo_va['Novo Valor'] = resumo_va['Valor'] + valor_input
+                else:
+                    resumo_va['Novo Valor'] = resumo_va['Valor'] * (1 + (valor_input / 100))
+
+                resumo_va['Custo Mensal Atual'] = resumo_va['Valor'] * resumo_va['Quantidade']
+                resumo_va['Custo Mensal Proposto'] = resumo_va['Novo Valor'] * resumo_va['Quantidade']
+                resumo_va['Impacto Mensal'] = resumo_va['Custo Mensal Proposto'] - resumo_va['Custo Mensal Atual']
+
+                # 6. Exibição da Tabela de Negociação
+                st.markdown("### Tabela de Impacto por Cargo")
+                
+                # Formatação para exibição
+                df_visualizacao = resumo_va.copy()
+                colunas_moeda = ['Valor', 'Novo Valor', 'Custo Mensal Atual', 'Custo Mensal Proposto', 'Impacto Mensal']
+                for col in colunas_moeda:
+                    df_visualizacao[col] = df_visualizacao[col].apply(formata_moeda)
+
+                st.dataframe(df_visualizacao, use_container_width=True, hide_index=True)
+
+                # 7. Resumo Financeiro da Aba
+                impacto_total_va = resumo_va['Impacto Mensal'].sum()
+                
+                st.markdown("---")
+                col_res_neg1, col_res_neg2, col_res_neg3 = st.columns(3)
+                
+                col_res_neg1.metric("Impacto Mensal Total", formata_moeda(impacto_total_va))
+                col_res_neg2.metric("Impacto Anual (12 meses)", formata_moeda(impacto_total_va * 12))
+                col_res_neg3.metric("Impacto Anual (C/ Férias/13º se houver)", formata_moeda(impacto_total_va * 13.3), help="Alguns municípios pagam o auxílio inclusive nas férias e 13º.")
+
+                # Gráfico de Impacto por Cargo
+                st.subheader("📊 Top 10 Cargos por Impacto Financeiro")
+                fig_impacto_cargo = px.bar(
+                    resumo_va.head(10), 
+                    x='Impacto Mensal', 
+                    y='Cargo', 
+                    orientation='h',
+                    text=resumo_va.head(10)['Impacto Mensal'].apply(formata_moeda),
+                    title=f"Maiores Impactos no Aumento de {rubrica_va_neg}"
+                )
+                fig_impacto_cargo.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_impacto_cargo, use_container_width=True)
 
         # =========================================================================
         # ABA 4: SIMULADOR DE IMPACTO (COM ENCARGOS AVANÇADOS E FAIXAS DE VA)
